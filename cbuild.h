@@ -363,7 +363,7 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 
 #include <stdlib.h> // malloc
 #include <stdio.h> // rename
-#include <string.h> // rename
+#include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>

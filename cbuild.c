@@ -4,7 +4,7 @@
 int main(int argc, char **argv)
 {
   (void)argc;
-  size   heap_capacity = 1 * 1024 * 1024;
+  size   heap_capacity = 8 * 1024 * 1024;
   size stdout_capacity = 8 * 1024;
 
   Arena heap[1] = { arena_init((u8*)malloc((usize)heap_capacity), heap_capacity) };
@@ -38,17 +38,8 @@ int main(int argc, char **argv)
     }
   }
 
-  Command cmd = da_init(heap, Command, 128);
-  *(da_push(heap, &cmd)) = S("cc");
-  *(da_push(heap, &cmd)) = S("-o");
-  *(da_push(heap, &cmd)) = S("cbuild");
-  *(da_push(heap, &cmd)) = S("cbuild.c");
-
-  cmd_render(cmd, stderr);
-  append_byte(stderr, '\n');
-
   { // Build program
-
+    append_lit(stdout, "TODO: Implement the calls to build an actual project here!\n");
   }
 
   flush(stdout);
