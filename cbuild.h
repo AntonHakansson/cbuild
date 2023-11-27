@@ -517,14 +517,21 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
   for (;;) {
     int wstatus = 0;
     if (waitpid(proc, &wstatus, 0) < 0) {
-      /* nob_log(NOB_ERROR, "could not wait on command (pid %d): %s", proc, strerror(errno)); */
+      log_begin(stderr, LOG_ERROR, S("Could not wait on child process (pid "));
+        append_long(stderr, (long)proc);
+        append_lit(stderr, "): ");
+        append_str(stderr, str_from_cstr(strerror(errno)));
+      log_end(stderr, (Str){0});
+
       return 0;
     }
 
     if (WIFEXITED(wstatus)) {
       int exit_status = WEXITSTATUS(wstatus);
       if (exit_status != 0) {
-        /* nob_log(NOB_ERROR, "command exited with exit code %d", exit_status); */
+        log_begin(stderr, LOG_ERROR, S("Child process exited with exit code "));
+          append_long(stderr, (long)exit_status);
+        log_end(stderr, (Str){0});
         return 0;
       }
 
@@ -532,7 +539,9 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
     }
 
     if (WIFSIGNALED(wstatus)) {
-      /* nob_log(NOB_ERROR, "command process was terminated by %s", strsignal(WTERMSIG(wstatus))); */
+      log_begin(stderr, LOG_ERROR, S("Child process was terminated by "));
+      append_str(stderr, str_from_cstr(strsignal(WTERMSIG(wstatus))));
+      log_end(stderr, (Str){0});
       return 0;
     }
   }
