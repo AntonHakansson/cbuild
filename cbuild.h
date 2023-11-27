@@ -85,7 +85,7 @@ void    append_long(Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), sizeof(*s.items), alignof(s.items), cap);     \
+        arena_alloc((a), sizeof(*s.items), alignof(typeof(s.items)), cap); \
       s;                                                                \
   })
 
@@ -94,7 +94,7 @@ void    append_long(Write_Buffer *b, long x);
       typeof(s) _s = s;                                                 \
       if (_s->len >= _s->capacity) {                                    \
         da_grow((a), (void **)&_s->items, &_s->capacity, &_s->len,      \
-                sizeof(*_s->items), alignof(*_s->items));              \
+                sizeof(*_s->items), alignof(typeof(*_s->items)));       \
       }                                                                 \
       _s->items + _s->len++;                                            \
     })
