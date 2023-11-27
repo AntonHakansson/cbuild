@@ -1,3 +1,5 @@
+// TODO: Credit tsoding properly
+
 #define CBUILD_IMPLEMENTATION
 #include "cbuild.h"
 
@@ -11,10 +13,11 @@ int main(int argc, char **argv)
   Write_Buffer stdout[1] = { fd_buffer(1, new(heap, u8, stdout_capacity), stdout_capacity) };
   Write_Buffer stderr[1] = { fd_buffer(2, new(heap, u8, stdout_capacity), stdout_capacity) };
 
+  // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
   if (!os_mkdir_if_not_exists("build", stderr)) return 1;
 
   { // Configure program i.e. write default ./build/config.h for current platform.
-    // if file ./build/config.h does not exist -> construct it and recompile build program as configured
+    // if file ./build/config.h does not exist -> construct it and recompile cbuild.
   }
 
   { // Rebuild Yourself
@@ -24,15 +27,18 @@ int main(int argc, char **argv)
     else if (status > 0) {
 
       Command cmd = da_init(heap, Command, 128);
+      // TODO: clean up with nicer interface, ex: VA_ARGS
       *(da_push(heap, &cmd)) = S("cc");
       *(da_push(heap, &cmd)) = S("-o");
       *(da_push(heap, &cmd)) = S("./build/cbuild.new");
       *(da_push(heap, &cmd)) = S("cbuild.c");
+#if 1 // debug flags
       *(da_push(heap, &cmd)) = S("-g");
       *(da_push(heap, &cmd)) = S("-Wall");
       *(da_push(heap, &cmd)) = S("-Wextra");
       *(da_push(heap, &cmd)) = S("-Wshadow");
       *(da_push(heap, &cmd)) = S("-fsanitize=address,undefined");
+#endif
 
       if (!os_run_cmd_sync(cmd, stderr)) { return 1; }
 
@@ -41,13 +47,14 @@ int main(int argc, char **argv)
       if (!os_rename("build/cbuild.new", "cbuild", stderr)) { os_exit(1); };
 
       // Re-run yourself
+      // TODO: use platform agnostic call.
       execv(argv[0], argv);
       assert(0 && "unreachable");
     }
   }
 
   { // Build program
-    append_lit(stdout, "TODO: Implement the calls to build an actual project here!\n");
+    append_lit(stdout, "TODO: Implement the calls to build an actual project here! For example sokol-examples.\n");
   }
 
   flush(stdout);
