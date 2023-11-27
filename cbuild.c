@@ -22,17 +22,25 @@ int main(int argc, char **argv)
     int status = os_needs_rebuild("cbuild", &cbuild_source, 1, stderr);
     if (status < 0) { exit(1); }
     else if (status > 0) {
-      if (!os_rename("cbuild", "build/cbuild.old", stderr)) { os_exit(1); };
 
       Command cmd = da_init(heap, Command, 128);
       *(da_push(heap, &cmd)) = S("cc");
       *(da_push(heap, &cmd)) = S("-o");
-      *(da_push(heap, &cmd)) = S("cbuild");
+      *(da_push(heap, &cmd)) = S("./build/cbuild.new");
       *(da_push(heap, &cmd)) = S("cbuild.c");
+      *(da_push(heap, &cmd)) = S("-g");
+      *(da_push(heap, &cmd)) = S("-Wall");
+      *(da_push(heap, &cmd)) = S("-Wextra");
+      *(da_push(heap, &cmd)) = S("-Wshadow");
+      *(da_push(heap, &cmd)) = S("-fsanitize=address,undefined");
 
       if (!os_run_cmd_sync(cmd, stderr)) { return 1; }
 
-      // Re-run build program
+      // Swap new and old
+      if (!os_rename("cbuild", "build/cbuild.old", stderr)) { os_exit(1); };
+      if (!os_rename("build/cbuild.new", "cbuild", stderr)) { os_exit(1); };
+
+      // Re-run yourself
       execv(argv[0], argv);
       assert(0 && "unreachable");
     }
