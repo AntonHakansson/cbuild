@@ -410,11 +410,11 @@ b32 os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr)
 {
   if (rename(old_path, new_path) < 0) {
     log_begin(stderr, LOG_ERROR, S("Could not rename "));
-    append_str(stderr, str_from_cstr((char *)old_path));
-    append_lit(stderr, " to ");
-    append_str(stderr, str_from_cstr((char *)new_path));
-    append_lit(stderr, ": ");
-    append_str(stderr, str_from_cstr(strerror(errno)));
+      append_str(stderr, str_from_cstr((char *)old_path));
+      append_lit(stderr, " to ");
+      append_str(stderr, str_from_cstr((char *)new_path));
+      append_lit(stderr, ": ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
     return 0;
   }
@@ -429,10 +429,10 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
     // NOTE: if output does not exist it 100% must be rebuilt
     if (errno == ENOENT) return 1;
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
-    append_str(stderr, str_from_cstr((char *)output_path));
-    append_lit(stderr, ": ");
-    append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, S(""));
+      append_str(stderr, str_from_cstr((char *)output_path));
+      append_lit(stderr, ": ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
     return -1;
   }
   i64 output_path_time = statbuf.st_mtime;
@@ -442,9 +442,9 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
     if (stat(input_path, &statbuf) < 0) {
       // NOTE: non-existing input is an error cause it is needed for building in the first place
       log_begin(stderr, LOG_ERROR, S("Could not stat "));
-      append_str(stderr, str_from_cstr((char *)input_path));
-      append_lit(stderr, ": ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
+        append_str(stderr, str_from_cstr((char *)input_path));
+        append_lit(stderr, ": ");
+        append_str(stderr, str_from_cstr(strerror(errno)));
       log_end(stderr, S(""));
       return -1;
     }
@@ -522,7 +522,6 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
         append_lit(stderr, "): ");
         append_str(stderr, str_from_cstr(strerror(errno)));
       log_end(stderr, (Str){0});
-
       return 0;
     }
 
@@ -540,7 +539,7 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
 
     if (WIFSIGNALED(wstatus)) {
       log_begin(stderr, LOG_ERROR, S("Child process was terminated by "));
-      append_str(stderr, str_from_cstr(strsignal(WTERMSIG(wstatus))));
+        append_str(stderr, str_from_cstr(strsignal(WTERMSIG(wstatus))));
       log_end(stderr, (Str){0});
       return 0;
     }
