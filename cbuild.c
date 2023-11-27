@@ -22,7 +22,7 @@ int main(int argc, char **argv)
   { // Rebuild Yourself
     const char *cbuild_source = "cbuild.c";
     int status = os_needs_rebuild("cbuild", &cbuild_source, 1, stderr);
-    if (status < 0) { exit(1); }
+    if (status < 0) { os_exit(1); }
     else if (status > 0) {
 
       Command cmd = da_init(heap, Command, 128);
@@ -39,7 +39,7 @@ int main(int argc, char **argv)
       *(da_push(heap, &cmd)) = S("-fsanitize=address,undefined");
 #endif
 
-      if (!os_run_cmd_sync(cmd, stderr)) { return 1; }
+      if (!os_run_cmd_sync(cmd, stderr)) { os_exit(1); }
 
       // Swap new and old
       if (!os_rename("cbuild", "build/cbuild.old", stderr)) { os_exit(1); };
