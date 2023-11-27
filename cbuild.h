@@ -35,9 +35,17 @@ b32 str_equals(Str a, Str b);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
-// TODO: address sanitizer poison memory regions
 
 #define new(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
+
+#if defined(__SANITIZE_ADDRESS__)
+#  include <sanitizer/asan_interface.h>
+#  define ASAN_POISON_MEMORY_REGION(addr, size)   __asan_poison_memory_region((addr), (size))
+#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#else
+#  define ASAN_POISON_MEMORY_REGION(addr, size)   ((void)(addr), (void)(size))
+#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
 
 typedef struct {
   u8 *backing;
@@ -63,6 +71,7 @@ typedef struct  {
 Write_Buffer write_buffer(u8 *buf, size capacity);
 Write_Buffer fd_buffer(i32 fd, u8 *buf, size capacity);
 void flush(Write_Buffer *b);
+
 void    append(Write_Buffer *b, unsigned char *src, size len);
 #define append_lit(b, s) append(b, (unsigned char*)s, sizeof(s) - 1)
 void    append_str(Write_Buffer *b, Str s);
@@ -76,7 +85,7 @@ void    append_long(Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), sizeof(*s.items), _Alignof(s.items), cap);      \
+        arena_alloc((a), sizeof(*s.items), _Alignof(s.items), cap);     \
       s;                                                                \
   })
 
@@ -217,6 +226,7 @@ Arena arena_init(u8 *backing, size capacity)
   Arena result = {};
   result.at = result.backing = backing;
   result.capacity = capacity;
+  ASAN_POISON_MEMORY_REGION(backing, (usize)capacity);
   return result;
 }
 
@@ -233,6 +243,7 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 
   u8 *p = a->at + padding;
   a->at += total;
+  ASAN_UNPOISON_MEMORY_REGION(p, objsize * count);
 
   for (size i = 0; i < objsize * count; i++) {
     p[i] = 0;
@@ -468,7 +479,7 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
       Write_Buffer b[1] = { write_buffer(cmd_mem, 1 * 1024 * 1024) };
       size i = 0;
       for (i = 0; i < command.len; i++) {
-        u8 *cmd_cstr = b->buf + b->len;
+        char *cmd_cstr = (char *)(b->buf + b->len);
         cmd_null[i] = cmd_cstr;
         append_str(b, command.items[i]);
         append_byte(b, 0);

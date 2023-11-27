@@ -3,6 +3,7 @@
 
 int main(int argc, char **argv)
 {
+  (void)argc;
   size   heap_capacity = 1 * 1024 * 1024;
   size stdout_capacity = 8 * 1024;
 
