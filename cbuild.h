@@ -30,10 +30,12 @@ typedef struct {
   size len;
 } Str;
 
+Str str_from_cstr(char *str);
 b32 str_equals(Str a, Str b);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
+// TODO: address sanitizer poison memory regions
 
 #define new(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
 
@@ -52,16 +54,16 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count);
 
 typedef struct  {
   u8 *buf;
-  i32 capacity;
-  i32 len;
+  size capacity;
+  size len;
   i32 fd;
   _Bool error;
 } Write_Buffer;
 
-Write_Buffer write_buffer(u8 *buf, i32 capacity);
-Write_Buffer fd_buffer(i32 fd, u8 *buf, i32 capacity);
+Write_Buffer write_buffer(u8 *buf, size capacity);
+Write_Buffer fd_buffer(i32 fd, u8 *buf, size capacity);
 void flush(Write_Buffer *b);
-void    append(Write_Buffer *b, unsigned char *src, i32 len);
+void    append(Write_Buffer *b, unsigned char *src, size len);
 #define append_lit(b, s) append(b, (unsigned char*)s, sizeof(s) - 1)
 void    append_str(Write_Buffer *b, Str s);
 void    append_byte(Write_Buffer *b, unsigned char c);
@@ -74,7 +76,7 @@ void    append_long(Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), sizeof(s.items), _Alignof(s.items), cap);      \
+        arena_alloc((a), sizeof(*s.items), _Alignof(s.items), cap);      \
       s;                                                                \
   })
 
@@ -106,21 +108,75 @@ typedef struct Command {
   size len;
 } Command;
 
+void cmd_append(Arena *arena, Command *cmd, Str arg)
+{
+  *(da_push(arena, cmd)) = arg;
+}
+
+Str cmd_render(Command cmd, Write_Buffer *buf)
+{
+  Str result = {0};
+  result.len = buf->len;
+  result.buf = buf->buf + buf->len;
+  for (size i = 0; i < cmd.len; i++) {
+    if (i > 0) { append_byte(buf, ' '); }
+    append_str(buf, cmd.items[i]);
+  }
+  result.len = buf->len - result.len;
+  return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//- Log
+
+typedef enum Log_Level {
+  LOG_ERROR,
+  LOG_INFO,
+
+  LOG_COUNT,
+} Log_Level;
+
+void log_begin(Write_Buffer* b, Log_Level level, Str prefix)
+{
+  switch(level) {
+  case LOG_ERROR: { append_lit(b, "[ERROR]: "); } break;
+  case LOG_INFO:  { append_lit(b, "[INFO]: ");  } break;
+  default: assert(0 && "unreachable");
+  }
+  append_str(b, prefix);
+}
+
+void log_end(Write_Buffer* b, Str suffix)
+{
+  append_str(b, suffix);
+  append_byte(b, '\n');
+  flush(b);
+}
+
+void log_emit(Write_Buffer* b, Log_Level level, Str fmt)
+{
+  log_begin(b, level, fmt);
+  log_end(b, (Str){0});
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Platform
+//
+// TODO: Get rid of null terminated strings in platform API.
+//       Use temporary buffer to convert to cstr between API boundaries.
 
 void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
-b32  os_mkdir_if_not_exists(char *directory);
-b32  os_rename(const char *old_path, const char *new_path);
-b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count);
+b32  os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr);
+b32  os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr);
+b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
 
 #define OS_INVALID_PROC (-1)
 typedef int OS_Proc;
-int os_run_cmd_async(Command command);
-b32 os_run_cmd_sync(Command command);
-b32 os_proc_wait(OS_Proc proc);
+int os_run_cmd_async(Command command, Write_Buffer *stderr);
+b32 os_run_cmd_sync(Command command, Write_Buffer* stderr);
+b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
 
 
 
@@ -129,6 +185,19 @@ b32 os_proc_wait(OS_Proc proc);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- String slice
+
+Str str_from_cstr(char *str)
+{
+  Str result = {0};
+  result.buf = (u8 *)str;
+
+  while (*str) {
+    result.len++;
+    str++;
+  }
+
+  return result;
+}
 
 b32 str_equals(Str a, Str b)
 {
@@ -155,7 +224,7 @@ __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 {
   size avail = (a->backing + a->capacity) - a->at;
-  size padding = -(uptr)a->at & (align - 1);
+  size padding = -((uptr)a->at) & (align - 1);
   size total   = padding + objsize * count;
   if (avail < total) {
     os_write(2, (u8 *)"Out of Memory", 13);
@@ -176,7 +245,7 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
 
-Write_Buffer write_buffer(u8 *buf, i32 capacity)
+Write_Buffer write_buffer(u8 *buf, size capacity)
 {
   Write_Buffer result = {0};
   result.buf = buf;
@@ -185,7 +254,7 @@ Write_Buffer write_buffer(u8 *buf, i32 capacity)
   return result;
 }
 
-Write_Buffer fd_buffer(i32 fd, u8 *buf, i32 capacity)
+Write_Buffer fd_buffer(i32 fd, u8 *buf, size capacity)
 {
   Write_Buffer result = {0};
   result.buf = buf;
@@ -194,13 +263,14 @@ Write_Buffer fd_buffer(i32 fd, u8 *buf, i32 capacity)
   return result;
 }
 
-void append(Write_Buffer *b, unsigned char *src, i32 len)
+void append(Write_Buffer *b, unsigned char *src, size len)
 {
+  assert(b);
   unsigned char *end = src + len;
-  while (!b->error && src<end) {
-    i32 left = end - src;
-    i32 avail = b->capacity - b->len;
-    i32 amount = avail<left ? avail : left;
+  while (!b->error && src < end) {
+    size left = (end - src);
+    size avail = b->capacity - b->len;
+    size amount = avail<left ? avail : left;
 
     for (i32 i = 0; i < amount; i++) {
       b->buf[b->len+i] = src[i];
@@ -274,7 +344,7 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//- Platform Agnostic Layer
+//- Platform Implemntation
 
 #ifdef _WIN32
 #error "windows api not implemented."
@@ -282,6 +352,7 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 
 #include <stdlib.h> // malloc
 #include <stdio.h> // rename
+#include <string.h> // rename
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -303,51 +374,70 @@ void os_exit (int status)
   exit(status);
 }
 
-b32 os_mkdir_if_not_exists(char *directory)
+b32 os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr)
 {
+  Str str_dir = str_from_cstr(directory);
   int result = mkdir(directory, 0755);
   if (result < 0) {
     if (errno == EEXIST) {
       return 1;
     }
 
-    // TODO: log error here
+    log_begin(stderr, LOG_ERROR, S("Could not create directory \""));
+      append_str(stderr, str_dir);
+    log_end(stderr, S("\""));
     return 0;
   }
 
-  // TODO: Log what we did.
+  log_begin(stderr, LOG_INFO, S("Created directory \""));
+    append_str(stderr, str_dir);
+  log_end(stderr, S("\""));
   return 1;
 }
 
-b32 os_rename(const char *old_path, const char *new_path)
+b32 os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr)
 {
   if (rename(old_path, new_path) < 0) {
-    /* nob_log(NOB_ERROR, "could not rename %s to %s: %s", old_path, new_path, strerror(errno)); */
+    log_begin(stderr, LOG_ERROR, S("Could not rename "));
+    append_str(stderr, str_from_cstr((char *)old_path));
+    append_lit(stderr, " to ");
+    append_str(stderr, str_from_cstr((char *)new_path));
+    append_lit(stderr, ": ");
+    append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
     return 0;
   }
   return 1;
 }
 
-b32 os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count)
+b32 os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr)
 {
   struct stat statbuf = {0};
 
   if (stat(output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
     if (errno == ENOENT) return 1;
-    /* nob_log(NOB_ERROR, "could not stat %s: %s", output_path, strerror(errno)); */
+    log_begin(stderr, LOG_ERROR, S("Could not stat "));
+    append_str(stderr, str_from_cstr((char *)output_path));
+    append_lit(stderr, ": ");
+    append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, S(""));
     return -1;
   }
-  int output_path_time = statbuf.st_mtime;
+  i64 output_path_time = statbuf.st_mtime;
 
-  for (size_t i = 0; i < input_paths_count; ++i) {
+  for (size i = 0; i < input_paths_count; ++i) {
     const char *input_path = input_paths[i];
     if (stat(input_path, &statbuf) < 0) {
       // NOTE: non-existing input is an error cause it is needed for building in the first place
-      /* nob_log(NOB_ERROR, "could not stat %s: %s", input_path, strerror(errno)); */
+      log_begin(stderr, LOG_ERROR, S("Could not stat "));
+      append_str(stderr, str_from_cstr((char *)input_path));
+      append_lit(stderr, ": ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
+      log_end(stderr, S(""));
       return -1;
     }
-    int input_path_time = statbuf.st_mtime;
+    i64 input_path_time = statbuf.st_mtime;
     // NOTE: if even a single input_path is fresher than output_path that's 100% rebuild
     if (input_path_time > output_path_time) return 1;
   }
@@ -355,16 +445,19 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
   return 0;
 }
 
-int os_run_cmd_async(Command command)
+int os_run_cmd_async(Command command, Write_Buffer *stderr)
 {
-  if (command.len < 1) {
-    // TODO: log error
-    return OS_INVALID_PROC;
-  }
+  assert(command.len >= 1);
+
+  log_begin(stderr, LOG_INFO, S("CMD: "));
+    cmd_render(command, stderr);
+  log_end(stderr, (Str){0});
 
   pid_t cpid = fork();
   if (cpid < 0) {
-    // TODO: log "Could not fork child process: %s", strerror(errno));
+    log_begin(stderr, LOG_ERROR, S("Could not fork child process: "));
+      append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
     return OS_INVALID_PROC;
   }
 
@@ -386,7 +479,10 @@ int os_run_cmd_async(Command command)
     }
 
     if (execvp(cmd_null[0], cmd_null) < 0) {
-      // TODO: log error
+      log_begin(stderr, LOG_ERROR, S("Could not exec child process: "));
+        append_str(stderr, str_from_cstr(strerror(errno)));
+      log_end(stderr, (Str){0});
+      os_exit(1);
     }
     assert(0 && "unreachable");
   }
@@ -394,17 +490,16 @@ int os_run_cmd_async(Command command)
   return cpid;
 }
 
-b32 os_run_cmd_sync(Command command)
+b32 os_run_cmd_sync(Command command, Write_Buffer *stderr)
 {
-  OS_Proc proc = os_run_cmd_async(command);
-  if (!os_proc_wait(proc)) {
-    /* append_str(stdout, S("[ERROR]: Failed to wait on proc.\n")); */
+  OS_Proc proc = os_run_cmd_async(command, stderr);
+  if (!os_proc_wait(proc, stderr)) {
     return 0;
   }
   return 1;
 }
 
-b32 os_proc_wait(OS_Proc proc)
+b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
 {
   if (proc == OS_INVALID_PROC) return 0;
 
