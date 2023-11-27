@@ -152,12 +152,12 @@ void log_begin(Write_Buffer* b, Log_Level level, Str prefix)
   case LOG_INFO:  { append_lit(b, "[INFO]: ");  } break;
   default: assert(0 && "unreachable");
   }
-  append_str(b, prefix);
+  if (prefix.buf) append_str(b, prefix);
 }
 
 void log_end(Write_Buffer* b, Str suffix)
 {
-  append_str(b, suffix);
+  if (suffix.buf) append_str(b, suffix);
   append_byte(b, '\n');
   flush(b);
 }
