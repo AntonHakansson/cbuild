@@ -7,11 +7,10 @@ int main(int argc, char **argv)
 {
   (void)argc;
   size   heap_capacity = 8 * 1024 * 1024;
-  size stdout_capacity = 8 * 1024;
+  size stderr_capacity = 4 * 1024;
 
   Arena heap[1] = { arena_init((u8*)malloc((usize)heap_capacity), heap_capacity) };
-  Write_Buffer stdout[1] = { fd_buffer(1, new(heap, u8, stdout_capacity), stdout_capacity) };
-  Write_Buffer stderr[1] = { fd_buffer(2, new(heap, u8, stdout_capacity), stdout_capacity) };
+  Write_Buffer stderr[1] = { fd_buffer(2, new(heap, u8, stderr_capacity), stderr_capacity) };
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
   if (!os_mkdir_if_not_exists("build", stderr)) return 1;
@@ -54,10 +53,9 @@ int main(int argc, char **argv)
   }
 
   { // Build program
-    append_lit(stdout, "TODO: Implement the calls to build an actual project here! For example sokol-examples.\n");
+    append_lit(stderr, "TODO: Implement the calls to build an actual project here! For example sokol-examples.\n");
   }
 
-  flush(stdout);
   flush(stderr);
   free(heap->backing);
   return 0;
