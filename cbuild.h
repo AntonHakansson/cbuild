@@ -177,6 +177,9 @@ void log_emit(Write_Buffer* b, Log_Level level, Str fmt)
 
 void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
+i32  os_open(char *file, Write_Buffer *stderr);
+b32  os_close(i32 fd, Write_Buffer *stderr);
+b32  os_file_exists(char *file, Write_Buffer *stderr);
 b32  os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr);
 b32  os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr);
 b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
@@ -369,6 +372,52 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <fcntl.h>
+
+i32 os_open(char *file, Write_Buffer *stderr)
+{
+  i32 fd = open(file, O_RDWR | O_CREAT, 0755);
+  if (fd < 0) {
+    log_begin(stderr, LOG_ERROR, S("Could not open file "));
+      append_str(stderr, str_from_cstr((char *)file));
+      append_lit(stderr, ": ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
+    return 0;
+  }
+  return fd;
+}
+
+b32 os_close(i32 fd, Write_Buffer *stderr)
+{
+  i32 status = close(fd);
+  if (status < 0) {
+    log_begin(stderr, LOG_ERROR, S("Could not close file (fd "));
+      append_long(stderr, fd);
+      append_lit(stderr, "): ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
+    return 0;
+  }
+  return 1;
+}
+
+b32 os_file_exists(char *file, Write_Buffer *stderr)
+{
+  struct stat statbuf = {0};
+
+  if (stat(file, &statbuf) < 0) {
+    if (errno == ENOENT) return 0;
+    log_begin(stderr, LOG_ERROR, S("Could not stat "));
+      append_str(stderr, str_from_cstr((char *)file));
+      append_lit(stderr, ": ");
+      append_str(stderr, str_from_cstr(strerror(errno)));
+    log_end(stderr, (Str){0});
+    return -1;
+  }
+
+  return 1;
+}
 
 b32 os_write(i32 fd, u8 *buf, size len)
 {
