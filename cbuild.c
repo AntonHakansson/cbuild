@@ -16,15 +16,16 @@ int main(int argc, char **argv)
   if (!os_mkdir_if_not_exists("build", stderr)) return 1;
 
   b32 user_requested_to_reconfigure = (argc > 1);
-  if (!os_file_exists("./build/config.h", stderr) || user_requested_to_reconfigure) {
+  if (!os_file_exists("build/config.h", stderr) || user_requested_to_reconfigure) {
     log_emit(stderr, LOG_INFO, S("Reconfiguring cbuild ..."));
 
-    // Configure program i.e. write default ./build/config.h for current platform.
-    // if file ./build/config.h does not exist -> construct it and recompile cbuild.
+    // Configure program i.e. write default build/config.h for current platform.
+    // if file build/config.h does not exist -> construct it and recompile cbuild.
 
+    // TODO: create an API for temporary arenas, we need to poisen the memory when done.
     Arena temp = *heap;
 
-    i32 conf_fd = os_open("./build/config.h", stderr);
+    i32 conf_fd = os_open("build/config.h", stderr);
     if (!conf_fd) { os_exit(1); }
 
     size conf_buffer_size = 8 * 1024;
@@ -50,7 +51,7 @@ int main(int argc, char **argv)
       // TODO: clean up with nicer interface, ex: VA_ARGS
       *(da_push(heap, &cmd)) = S("cc");
       *(da_push(heap, &cmd)) = S("-o");
-      *(da_push(heap, &cmd)) = S("./build/cbuild.new");
+      *(da_push(heap, &cmd)) = S("build/cbuild.new");
       *(da_push(heap, &cmd)) = S("cbuild.c");
 #if 1 // debug flags
       *(da_push(heap, &cmd)) = S("-g");
