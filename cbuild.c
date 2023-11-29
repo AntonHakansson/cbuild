@@ -9,7 +9,7 @@ int main(int argc, char **argv)
   size   heap_capacity = 8 * 1024 * 1024;
   size stderr_capacity = 4 * 1024;
 
-  Arena heap[1] = { arena_init((u8*)malloc((usize)heap_capacity), heap_capacity) };
+  Arena *heap = alloc_arena(heap_capacity);
   Write_Buffer stderr[1] = { fd_buffer(2, new(heap, u8, stderr_capacity), stderr_capacity) };
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
@@ -22,14 +22,13 @@ int main(int argc, char **argv)
     // Configure program i.e. write default build/config.h for current platform.
     // if file build/config.h does not exist -> construct it and recompile cbuild.
 
-    // TODO: create an API for temporary arenas, we need to poisen the memory when done.
-    Arena temp = *heap;
+    Arena_Mark scratch = arena_scratch(&heap, 1);
 
     i32 conf_fd = os_open("build/config.h", stderr);
     if (!conf_fd) { os_exit(1); }
 
     size conf_buffer_size = 8 * 1024;
-    Write_Buffer conf[1] = { fd_buffer(conf_fd, new(&temp, u8, conf_buffer_size), conf_buffer_size) };
+    Write_Buffer conf[1] = { fd_buffer(conf_fd, new(scratch.arena, u8, conf_buffer_size), conf_buffer_size) };
 
     append_lit(conf, "#define TARGET_LINUX\n");
     append_lit(conf, "#define GIT_COMMIT \"arstenenxzcd\"\n");
@@ -38,6 +37,8 @@ int main(int argc, char **argv)
     flush(conf);
     log_emit(stderr, LOG_INFO, S("Wrote build/config.h"));
     os_close(conf_fd, stderr);
+
+    arena_pop_mark(scratch);
   }
 
   { // Rebuild Yourself
@@ -79,6 +80,6 @@ int main(int argc, char **argv)
   }
 
   flush(stderr);
-  free(heap->backing);
+  free_arena(heap);
   return 0;
 }

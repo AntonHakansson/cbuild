@@ -53,9 +53,26 @@ typedef struct {
   size capacity;
 } Arena;
 
+Arena *alloc_arena(size capacity);
+void   free_arena(Arena *arena);
+
 Arena arena_init(u8 *backing, size capacity);
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 u8 *arena_alloc(Arena *a, size objsize, size align, size count);
+
+typedef struct {
+  Arena *arena;
+  u8 *marker;
+} Arena_Mark;
+
+Arena_Mark arena_push_mark(Arena *a);
+void arena_pop_mark(Arena_Mark a);
+
+#define SCRATCH_ARENA_COUNT 2
+#define SCRATCH_ARENA_CAPACITY (8 * 1024 * 1024)
+
+Arena_Mark arena_scratch(Arena **conflicts, size conflicts_len);
+void free_scratch_pool();
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
@@ -85,7 +102,7 @@ void    append_long(Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), sizeof(*s.items), alignof(typeof(s.items)), cap); \
+        arena_alloc((a), sizeof(*s.items), alignof(typeof(*s.items)), s.capacity); \
       s;                                                                \
   })
 
@@ -175,6 +192,8 @@ void log_emit(Write_Buffer* b, Log_Level level, Str fmt)
 // TODO: Get rid of null terminated strings in platform API.
 //       Use temporary buffer to convert to cstr between API boundaries.
 
+u8  *os_malloc(size amount);
+void os_mfree(u8 *memory_to_free);
 void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
 i32  os_open(char *file, Write_Buffer *stderr);
@@ -248,11 +267,98 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count)
   a->at += total;
   ASAN_UNPOISON_MEMORY_REGION(p, objsize * count);
 
+  // TODO: memcpy
   for (size i = 0; i < objsize * count; i++) {
     p[i] = 0;
   }
 
   return p;
+}
+
+Arena *alloc_arena(size capacity)
+{
+  Arena *result = 0;
+  u8 *mem = os_malloc(capacity);
+  Arena temp = arena_init(mem, capacity);
+  result = new(&temp, Arena, 1);
+  *result = temp;
+  return result;
+}
+
+void free_arena(Arena *arena)
+{
+  u8 *to_free = arena->backing;
+  // TODO: memset here
+  { arena->backing = arena->at = 0;
+    arena->capacity = 0; }
+  os_mfree(to_free);
+}
+
+Arena_Mark arena_push_mark(Arena *a)
+{
+  Arena_Mark result = {0};
+  result.arena = a;
+  result.marker = a->at;
+  return result;
+}
+
+void arena_pop_mark(Arena_Mark a)
+{
+  assert(a.arena->at > a.marker);
+  size len = a.arena->at - a.marker;
+  assert(len >= 0);
+  ASAN_POISON_MEMORY_REGION(a.marker, len);
+  a.arena->at = a.marker;
+}
+
+__thread Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
+
+Arena *_arena_get_scratch(Arena **conflicts, size conflicts_len)
+{
+  assert(conflicts_len < SCRATCH_ARENA_COUNT);
+
+  Arena **scratch_pool = g_thread_scratch_pool;
+
+  if (scratch_pool[0] == 0) {
+    for (size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
+      scratch_pool[i] = alloc_arena(SCRATCH_ARENA_CAPACITY);
+    }
+    return scratch_pool[0];
+  }
+
+  for (size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
+    for (size j = 0; j < conflicts_len; j++) {
+      if (scratch_pool[i] == conflicts[j]) {
+        break;
+      }
+      else {
+        return scratch_pool[i];
+      }
+    }
+  }
+
+  assert(0 && "unreachable if care was taken to provide conflicting arenas.");
+  return 0;
+}
+
+Arena_Mark arena_scratch(Arena **conflicts, size conflicts_len)
+{
+  Arena *a = _arena_get_scratch(conflicts, conflicts_len);
+  Arena_Mark result = {0};
+  if (a) {
+   result = arena_push_mark(a);
+  }
+  return result;
+}
+
+void free_scratch_pool()
+{
+  for (size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
+    Arena *a = g_thread_scratch_pool[i];
+    if (a) {
+      os_mfree(a->backing);
+    }
+  }
 }
 
 
@@ -297,8 +403,6 @@ void append(Write_Buffer *b, unsigned char *src, size len)
     }
   }
 }
-
-#define append_lit(b, s) append(b, (unsigned char*)s, sizeof(s) - 1)
 
 void append_str(Write_Buffer *b, Str s)
 {
@@ -361,8 +465,10 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 //- Platform Implemntation
 
 #ifdef _WIN32
+//-- Windows Platform
 #error "windows api not implemented."
-#else
+#else // Linux
+//-- Linux/Posix Platform
 
 #include <stdlib.h> // malloc
 #include <stdio.h> // rename
@@ -373,6 +479,22 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
+
+u8 *os_malloc(size amount)
+{
+  u8 *mem = (u8 *)malloc((usize)amount);
+  if (mem == 0) {
+    os_write(2, (u8 *)"Out of memory\n", 15);
+    os_exit(1);
+  }
+  return mem;
+}
+
+void os_mfree(u8 *memory_to_free)
+{
+  free(memory_to_free);
+}
+
 
 i32 os_open(char *file, Write_Buffer *stderr)
 {
@@ -429,7 +551,7 @@ b32 os_write(i32 fd, u8 *buf, size len)
   return 1;
 }
 
-void os_exit (int status)
+void os_exit(int status)
 {
   exit(status);
 }
