@@ -9,33 +9,10 @@ int main(int argc, char **argv)
   Write_Buffer *stderr = fd_buffer(2, heap, 4 * 1024);
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
-  if (!os_mkdir_if_not_exists("build", stderr)) return 1;
-
-  b32 user_requested_to_reconfigure = (argc > 1);
-  if (!os_file_exists("build/config.h", stderr) || user_requested_to_reconfigure) {
-    log_emit(stderr, LOG_INFO, S("Reconfiguring cbuild ..."));
-
-    // Configure program i.e. write default build/config.h for current platform.
-    // if file build/config.h does not exist -> construct it and recompile cbuild.
-
-    Arena_Mark scratch = arena_get_scratch(&heap, 1);
-
-    i32 conf_fd = os_open("build/config.h", stderr);
-    if (!conf_fd) { os_exit(1); }
-
-    Write_Buffer *conf = fd_buffer(conf_fd, scratch.arena, 8 * 1024);
-    append_lit(conf, "#define TARGET_LINUX\n");
-    append_lit(conf, "#define GIT_COMMIT \"arstenenxzcd\"\n");
-    append_lit(conf, "#define CBUILD_VERSION 123\n");
-
-    flush(conf);
-    log_emit(stderr, LOG_INFO, S("Wrote build/config.h"));
-    os_close(conf_fd, stderr);
-
-    arena_pop_mark(scratch);
-  }
 
   { // Rebuild Yourself
+    if (!os_mkdir_if_not_exists("build", stderr)) return 1;
+
     const char *cbuild_sources[2] = { "cbuild.c", "cbuild.h", };
     int status = os_needs_rebuild("cbuild", cbuild_sources, countof(cbuild_sources), stderr);
     if (status < 0) { os_exit(1); }
@@ -67,6 +44,30 @@ int main(int argc, char **argv)
       execv(argv[0], argv);
       assert(0 && "unreachable");
     }
+  }
+
+  b32 user_requested_to_reconfigure = (argc > 1);
+  if (!os_file_exists("build/config.h", stderr) || user_requested_to_reconfigure) {
+    log_emit(stderr, LOG_INFO, S("Reconfiguring cbuild ..."));
+
+    // Configure program i.e. write default build/config.h for current platform.
+    // if file build/config.h does not exist -> construct it and recompile cbuild.
+
+    Arena_Mark scratch = arena_get_scratch(&heap, 1);
+
+    i32 conf_fd = os_open("build/config.h", stderr);
+    if (!conf_fd) { os_exit(1); }
+
+    Write_Buffer *conf = fd_buffer(conf_fd, scratch.arena, 8 * 1024);
+    append_lit(conf, "#define TARGET_LINUX\n");
+    append_lit(conf, "#define GIT_COMMIT \"arstenenxzcd\"\n");
+    append_lit(conf, "#define CBUILD_VERSION 123\n");
+
+    flush(conf);
+    log_emit(stderr, LOG_INFO, S("Wrote build/config.h"));
+    os_close(conf_fd, stderr);
+
+    arena_pop_mark(scratch);
   }
 
   { // Build program
