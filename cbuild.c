@@ -10,7 +10,7 @@ int main(int argc, char **argv)
   size stderr_capacity = 4 * 1024;
 
   Arena *heap = alloc_arena(heap_capacity);
-  Write_Buffer stderr[1] = { fd_buffer(2, new(heap, u8, stderr_capacity), stderr_capacity) };
+  Write_Buffer *stderr = fd_buffer(2, heap, stderr_capacity);
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
   if (!os_mkdir_if_not_exists("build", stderr)) return 1;
@@ -27,9 +27,7 @@ int main(int argc, char **argv)
     i32 conf_fd = os_open("build/config.h", stderr);
     if (!conf_fd) { os_exit(1); }
 
-    size conf_buffer_size = 8 * 1024;
-    Write_Buffer conf[1] = { fd_buffer(conf_fd, new(scratch.arena, u8, conf_buffer_size), conf_buffer_size) };
-
+    Write_Buffer *conf = fd_buffer(conf_fd, scratch.arena, 8 * 1024);
     append_lit(conf, "#define TARGET_LINUX\n");
     append_lit(conf, "#define GIT_COMMIT \"arstenenxzcd\"\n");
     append_lit(conf, "#define CBUILD_VERSION 123\n");

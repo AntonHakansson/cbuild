@@ -85,8 +85,8 @@ typedef struct  {
   _Bool error;
 } Write_Buffer;
 
-Write_Buffer write_buffer(u8 *buf, size capacity);
-Write_Buffer fd_buffer(i32 fd, u8 *buf, size capacity);
+Write_Buffer *mem_buffer(Arena *a, size capacity);
+Write_Buffer *fd_buffer(i32 fd, Arena *a, size capacity);
 void flush(Write_Buffer *b);
 
 void    append(Write_Buffer *b, unsigned char *src, size len);
@@ -365,21 +365,21 @@ void free_scratch_pool()
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
 
-Write_Buffer write_buffer(u8 *buf, size capacity)
+Write_Buffer *mem_buffer(Arena *a, size capacity)
 {
-  Write_Buffer result = {0};
-  result.buf = buf;
-  result.capacity = capacity;
-  result.fd = -1;
+  Write_Buffer *result = new(a, Write_Buffer, 1);
+  result->buf = new(a, u8, capacity);
+  result->capacity = capacity;
+  result->fd = -1;
   return result;
 }
 
-Write_Buffer fd_buffer(i32 fd, u8 *buf, size capacity)
+Write_Buffer *fd_buffer(i32 fd, Arena *a, size capacity)
 {
-  Write_Buffer result = {0};
-  result.buf = buf;
-  result.capacity = capacity;
-  result.fd = fd;
+  Write_Buffer *result = new(a, Write_Buffer, 1);
+  result->buf = new(a, u8, capacity);
+  result->capacity = capacity;
+  result->fd = fd;
   return result;
 }
 
@@ -629,6 +629,7 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
 
 int os_run_cmd_async(Command command, Write_Buffer *stderr)
 {
+  Arena_Mark scratch = arena_scratch(0, 0);
   assert(command.len >= 1);
 
   log_begin(stderr, LOG_INFO, S("CMD: "));
@@ -644,10 +645,9 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
   }
 
   if (cpid == 0) {
-    u8 cmd_mem[1 * 1024 * 1024];
+    Write_Buffer *b = mem_buffer(scratch.arena, 4 * 1024);
     char *cmd_null[512];
     {
-      Write_Buffer b[1] = { write_buffer(cmd_mem, 1 * 1024 * 1024) };
       size i = 0;
       for (i = 0; i < command.len; i++) {
         char *cmd_cstr = (char *)(b->buf + b->len);
@@ -669,6 +669,7 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
     assert(0 && "unreachable");
   }
 
+  arena_pop_mark(scratch);
   return cpid;
 }
 
