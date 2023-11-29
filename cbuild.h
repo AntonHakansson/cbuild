@@ -341,7 +341,7 @@ Arena *_arena_get_scratch(Arena **conflicts, size conflicts_len)
   return 0;
 }
 
-Arena_Mark arena_scratch(Arena **conflicts, size conflicts_len)
+Arena_Mark arena_get_scratch(Arena **conflicts, size conflicts_len)
 {
   Arena *a = _arena_get_scratch(conflicts, conflicts_len);
   Arena_Mark result = {0};
@@ -629,7 +629,7 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
 
 int os_run_cmd_async(Command command, Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_scratch(0, 0);
+  Arena_Mark scratch = arena_get_scratch(0, 0);
   assert(command.len >= 1);
 
   log_begin(stderr, LOG_INFO, S("CMD: "));

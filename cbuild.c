@@ -5,12 +5,8 @@
 
 int main(int argc, char **argv)
 {
-  (void)argc;
-  size   heap_capacity = 8 * 1024 * 1024;
-  size stderr_capacity = 4 * 1024;
-
-  Arena *heap = alloc_arena(heap_capacity);
-  Write_Buffer *stderr = fd_buffer(2, heap, stderr_capacity);
+  Arena *heap = alloc_arena(8 * 1024 * 1024);
+  Write_Buffer *stderr = fd_buffer(2, heap, 4 * 1024);
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
   if (!os_mkdir_if_not_exists("build", stderr)) return 1;
@@ -22,7 +18,7 @@ int main(int argc, char **argv)
     // Configure program i.e. write default build/config.h for current platform.
     // if file build/config.h does not exist -> construct it and recompile cbuild.
 
-    Arena_Mark scratch = arena_scratch(&heap, 1);
+    Arena_Mark scratch = arena_get_scratch(&heap, 1);
 
     i32 conf_fd = os_open("build/config.h", stderr);
     if (!conf_fd) { os_exit(1); }
@@ -79,5 +75,6 @@ int main(int argc, char **argv)
 
   flush(stderr);
   free_arena(heap);
+  free_scratch_pool();
   return 0;
 }
