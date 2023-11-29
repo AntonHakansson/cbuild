@@ -40,8 +40,8 @@ int main(int argc, char **argv)
   }
 
   { // Rebuild Yourself
-    const char *cbuild_source = "cbuild.c";
-    int status = os_needs_rebuild("cbuild", &cbuild_source, 1, stderr);
+    const char *cbuild_sources[2] = { "cbuild.c", "cbuild.h", };
+    int status = os_needs_rebuild("cbuild", cbuild_sources, countof(cbuild_sources), stderr);
     if (status < 0) { os_exit(1); }
     else if (status > 0) {
       log_emit(stderr, LOG_INFO, S("Rebuilding cbuild ..."));
