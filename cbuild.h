@@ -203,7 +203,7 @@ i32  os_open(Str filepath, Write_Buffer *stderr);
 b32  os_close(i32 fd, Write_Buffer *stderr);
 b32  os_file_exists(Str filepath, Write_Buffer *stderr);
 b32  os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr);
-b32  os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr);
+b32  os_rename(Str old_path, Str new_path, Write_Buffer *stderr);
 b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
 
 #define OS_INVALID_PROC (-1)
@@ -608,19 +608,28 @@ b32 os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr)
   return result;
 }
 
-b32 os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr)
+b32 os_rename(Str old_path, Str new_path, Write_Buffer *stderr)
 {
-  if (rename(old_path, new_path) < 0) {
+  Arena_Mark scratch = arena_get_scratch(0, 0);
+  b32 result = 0;
+
+  char *c_old_path = str_to_cstr(scratch.arena, old_path);
+  char *c_new_path = str_to_cstr(scratch.arena, new_path);
+  if (rename(c_old_path, c_new_path) < 0) {
     log_begin(stderr, LOG_ERROR, S("Could not rename "));
-      append_str(stderr, str_from_cstr((char *)old_path));
+      append_str(stderr, old_path);
       append_lit(stderr, " to ");
-      append_str(stderr, str_from_cstr((char *)new_path));
+      append_str(stderr, new_path);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return 0;
+    return_defer(0);
   }
-  return 1;
+  return_defer(1);
+
+ defer:
+  arena_pop_mark(scratch);
+  return result;
 }
 
 b32 os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr)
