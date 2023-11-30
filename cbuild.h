@@ -20,7 +20,7 @@ typedef __SIZE_TYPE__    usize;
 #define alignof(s) (size)_Alignof(s)
 #define countof(s) (sizeof(s) / sizeof(*(s)))
 #define assert(c)  while((!(c))) __builtin_unreachable()
-#define return_defer(r)  { result = (r); goto defer; }
+#define return_defer(r)  do { result = (r); goto defer; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
@@ -550,7 +550,7 @@ b32 os_file_exists(Str filepath, Write_Buffer *stderr)
   char *c_filepath = str_to_cstr(scratch.arena, filepath);
   struct stat statbuf = {0};
   if (stat(c_filepath, &statbuf) < 0) {
-    if (errno == ENOENT) { return_defer(0) };
+    if (errno == ENOENT) { return_defer(0); };
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
       append_str(stderr, filepath);
       append_lit(stderr, ": ");
