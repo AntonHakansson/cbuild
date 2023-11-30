@@ -2,6 +2,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Types and Utils
+//
+// REVIEW: Introduce a byte type that aliases i.e. char. Right now I use u8 all over the
+// place.
 
 typedef __UINT8_TYPE__   u8;
 typedef __UINT32_TYPE__  u32;
@@ -191,9 +194,6 @@ void log_emit(Write_Buffer* b, Log_Level level, Str fmt)
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Platform
-//
-// TODO: Get rid of null terminated strings in platform API.
-//       Use temporary buffer to convert to cstr between API boundaries.
 
 u8  *os_malloc(size amount);
 void os_mfree(u8 *memory_to_free);
@@ -204,7 +204,7 @@ b32  os_close(i32 fd, Write_Buffer *stderr);
 b32  os_file_exists(Str filepath, Write_Buffer *stderr);
 b32  os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr);
 b32  os_rename(Str old_path, Str new_path, Write_Buffer *stderr);
-b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
+b32  os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, Write_Buffer *stderr);
 
 #define OS_INVALID_PROC (-1)
 typedef int OS_Proc;
@@ -632,39 +632,46 @@ b32 os_rename(Str old_path, Str new_path, Write_Buffer *stderr)
   return result;
 }
 
-b32 os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr)
+b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, Write_Buffer *stderr)
 {
-  struct stat statbuf = {0};
+  Arena_Mark scratch = arena_get_scratch(0, 0);
+  b32 result = 0;
 
-  if (stat(output_path, &statbuf) < 0) {
+  char *c_output_path = str_to_cstr(scratch.arena, output_path);
+
+  struct stat statbuf = {0};
+  if (stat(c_output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
-    if (errno == ENOENT) return 1;
+    if (errno == ENOENT) { return_defer(1); };
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
-      append_str(stderr, str_from_cstr((char *)output_path));
+      append_str(stderr, output_path);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return -1;
+    return_defer(-1);
   }
   i64 output_path_time = statbuf.st_mtime;
 
-  for (size i = 0; i < input_paths_count; ++i) {
-    const char *input_path = input_paths[i];
-    if (stat(input_path, &statbuf) < 0) {
+  for (size i = 0; i < input_paths_len; ++i) {
+    Str input_path = input_paths[i];
+    char *c_input_path = str_to_cstr(scratch.arena, input_path);
+    if (stat(c_input_path, &statbuf) < 0) {
       // NOTE: non-existing input is an error cause it is needed for building in the first place
       log_begin(stderr, LOG_ERROR, S("Could not stat "));
-        append_str(stderr, str_from_cstr((char *)input_path));
+        append_str(stderr, input_path);
         append_lit(stderr, ": ");
         append_str(stderr, str_from_cstr(strerror(errno)));
       log_end(stderr, S(""));
-      return -1;
+      return_defer(-1);
     }
     i64 input_path_time = statbuf.st_mtime;
     // NOTE: if even a single input_path is fresher than output_path that's 100% rebuild
-    if (input_path_time > output_path_time) return 1;
+    if (input_path_time > output_path_time) return_defer(1);
   }
 
-  return 0;
+ defer:
+  arena_pop_mark(scratch);
+  return result;
 }
 
 int os_run_cmd_async(Command command, Write_Buffer *stderr)

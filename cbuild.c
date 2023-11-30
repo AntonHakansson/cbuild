@@ -14,8 +14,8 @@ int main(int argc, char **argv)
   { // Rebuild Yourself
     if (!os_mkdir_if_not_exists(S("build"), stderr)) return 1;
 
-    const char *cbuild_sources[2] = { "cbuild.c", "cbuild.h", };
-    int status = os_needs_rebuild("cbuild", cbuild_sources, countof(cbuild_sources), stderr);
+    Str cbuild_sources[2] = { S("cbuild.c"), S("cbuild.h"), };
+    int status = os_needs_rebuild(S("cbuild"), cbuild_sources, countof(cbuild_sources), stderr);
     if (status < 0) { os_exit(1); }
     else if (status > 0) {
       log_emit(stderr, LOG_INFO, S("Rebuilding cbuild ..."));
