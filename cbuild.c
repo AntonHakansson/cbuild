@@ -6,6 +6,7 @@
 int main(int argc, char **argv)
 {
   Arena *heap = alloc_arena(8 * 1024 * 1024);
+  // REVIEW: Move this to global cbuild context.
   Write_Buffer *stderr = fd_buffer(2, heap, 4 * 1024);
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
