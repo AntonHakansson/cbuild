@@ -346,6 +346,9 @@ Arena *_arena_get_scratch(Arena **conflicts, size conflicts_len)
     }
   }
 
+  if (conflicts_len == 0) {
+    return scratch_pool[0];
+  }
   assert(0 && "unreachable if care was taken to provide conflicting arenas.");
   return 0;
 }
