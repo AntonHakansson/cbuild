@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 
     Arena_Mark scratch = arena_get_scratch(&heap, 1);
 
-    i32 conf_fd = os_open("build/config.h", stderr);
+    i32 conf_fd = os_open(S("build/config.h"), stderr);
     if (!conf_fd) { os_exit(1); }
 
     Write_Buffer *conf = fd_buffer(conf_fd, scratch.arena, 8 * 1024);

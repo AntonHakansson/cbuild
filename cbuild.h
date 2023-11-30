@@ -19,21 +19,6 @@ typedef __SIZE_TYPE__    usize;
 #define assert(c)  while((!(c))) __builtin_unreachable()
 
 ////////////////////////////////////////////////////////////////////////////////
-//- String slice
-
-#define S(s)        (Str){ .buf = (u8 *)(s), .len = countof((s)) - 1, }
-#define S_FMT       "%.*s"
-#define S_ARG(s)    (i32)(s).len, (s).buf
-
-typedef struct {
-  u8 *buf;
-  size len;
-} Str;
-
-Str str_from_cstr(char *str);
-b32 str_equals(Str a, Str b);
-
-////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
 
 #define new(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
@@ -73,6 +58,23 @@ void arena_pop_mark(Arena_Mark a);
 
 Arena_Mark arena_scratch(Arena **conflicts, size conflicts_len);
 void free_scratch_pool();
+
+
+////////////////////////////////////////////////////////////////////////////////
+//- String slice
+
+#define S(s)        (Str){ .buf = (u8 *)(s), .len = countof((s)) - 1, }
+#define S_FMT       "%.*s"
+#define S_ARG(s)    (i32)(s).len, (s).buf
+
+typedef struct {
+  u8 *buf;
+  size len;
+} Str;
+
+Str str_from_cstr(char *str);
+b32 str_equals(Str a, Str b);
+char *str_to_cstr(Arena *a, Str s);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
@@ -196,7 +198,7 @@ u8  *os_malloc(size amount);
 void os_mfree(u8 *memory_to_free);
 void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
-i32  os_open(char *file, Write_Buffer *stderr);
+i32  os_open(Str filepath, Write_Buffer *stderr);
 b32  os_close(i32 fd, Write_Buffer *stderr);
 b32  os_file_exists(char *file, Write_Buffer *stderr);
 b32  os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr);
@@ -239,6 +241,13 @@ b32 str_equals(Str a, Str b)
   return 1;
 }
 
+char *str_to_cstr(Arena *a, Str s)
+{
+  Write_Buffer *b = mem_buffer(a, s.len + 1);
+  append_str(b, s);
+  append_byte(b, '\0');
+  return (char *)b->buf;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
@@ -496,17 +505,22 @@ void os_mfree(u8 *memory_to_free)
 }
 
 
-i32 os_open(char *file, Write_Buffer *stderr)
+/* i32 os_open(char *file, Write_Buffer *stderr) */
+i32  os_open(Str filepath, Write_Buffer *stderr)
 {
-  i32 fd = open(file, O_RDWR | O_CREAT, 0755);
+  Arena_Mark scratch = arena_get_scratch(0, 0);
+  char *c_filepath = str_to_cstr(scratch.arena, filepath);
+  i32 fd = open(c_filepath, O_RDWR | O_CREAT, 0755);
   if (fd < 0) {
     log_begin(stderr, LOG_ERROR, S("Could not open file "));
-      append_str(stderr, str_from_cstr((char *)file));
+      append_str(stderr, filepath);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return 0;
+    fd = 0;
   }
+
+  arena_pop_mark(scratch);
   return fd;
 }
 
