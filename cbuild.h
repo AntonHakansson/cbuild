@@ -202,7 +202,7 @@ b32  os_write(i32 fd, u8 *buf, size len);
 i32  os_open(Str filepath, Write_Buffer *stderr);
 b32  os_close(i32 fd, Write_Buffer *stderr);
 b32  os_file_exists(Str filepath, Write_Buffer *stderr);
-b32  os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr);
+b32  os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr);
 b32  os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr);
 b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
 
@@ -580,25 +580,32 @@ void os_exit(int status)
   exit(status);
 }
 
-b32 os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr)
+b32 os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr)
 {
-  Str str_dir = str_from_cstr(directory);
-  int result = mkdir(directory, 0755);
-  if (result < 0) {
+  Arena_Mark scratch = arena_get_scratch(0, 0);
+  b32 result = 0;
+
+  char *c_directory = str_to_cstr(scratch.arena, directory);
+  int ok = mkdir(c_directory, 0755);
+  if (ok < 0) {
     if (errno == EEXIST) {
-      return 1;
+      return_defer(1);
     }
 
     log_begin(stderr, LOG_ERROR, S("Could not create directory \""));
-      append_str(stderr, str_dir);
+      append_str(stderr, directory);
     log_end(stderr, S("\""));
-    return 0;
+    return_defer(0);
   }
 
+  result = 1;
   log_begin(stderr, LOG_INFO, S("Created directory \""));
-    append_str(stderr, str_dir);
+    append_str(stderr, directory);
   log_end(stderr, S("\""));
-  return 1;
+
+ defer:
+  arena_pop_mark(scratch);
+  return result;
 }
 
 b32 os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr)

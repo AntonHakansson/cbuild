@@ -12,7 +12,7 @@ int main(int argc, char **argv)
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
 
   { // Rebuild Yourself
-    if (!os_mkdir_if_not_exists("build", stderr)) return 1;
+    if (!os_mkdir_if_not_exists(S("build"), stderr)) return 1;
 
     const char *cbuild_sources[2] = { "cbuild.c", "cbuild.h", };
     int status = os_needs_rebuild("cbuild", cbuild_sources, countof(cbuild_sources), stderr);
