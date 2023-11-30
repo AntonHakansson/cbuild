@@ -54,7 +54,7 @@ int main(int argc, char **argv)
     // Configure program i.e. write default build/config.h for current platform.
     // if file build/config.h does not exist -> construct it and recompile cbuild.
 
-    Arena_Mark scratch = arena_get_scratch(&heap, 1);
+    Arena_Mark scratch = arena_get_scratch(0, 0);
 
     i32 conf_fd = os_open(S("build/config.h"), stderr);
     if (!conf_fd) { os_exit(1); }

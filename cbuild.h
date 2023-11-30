@@ -646,7 +646,6 @@ b32 os_needs_rebuild(const char *output_path, const char **input_paths, int inpu
 
 int os_run_cmd_async(Command command, Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
   assert(command.len >= 1);
 
   log_begin(stderr, LOG_INFO, S("CMD: "));
@@ -662,18 +661,14 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
   }
 
   if (cpid == 0) {
-    Write_Buffer *b = mem_buffer(scratch.arena, 4 * 1024);
+    Arena_Mark scratch = arena_get_scratch(0, 0); // REVIEW: not sure what happens here, we never pop the mark
     char *cmd_null[512];
-    {
+    { // Fill cmd
       size i = 0;
       for (i = 0; i < command.len; i++) {
-        char *cmd_cstr = (char *)(b->buf + b->len);
-        cmd_null[i] = cmd_cstr;
-        append_str(b, command.items[i]);
-        append_byte(b, 0);
+        cmd_null[i] = str_to_cstr(scratch.arena, command.items[i]);
       }
       assert(i < 512);
-      assert(!b->error);
       cmd_null[i] = 0;
     }
 
@@ -686,7 +681,6 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
     assert(0 && "unreachable");
   }
 
-  arena_pop_mark(scratch);
   return cpid;
 }
 
