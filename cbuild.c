@@ -21,18 +21,12 @@ int main(int argc, char **argv)
       log_emit(stderr, LOG_INFO, S("Rebuilding cbuild ..."));
 
       Command cmd = da_init(heap, Command, 128);
-      // TODO: clean up with nicer interface, ex: VA_ARGS
-      *(da_push(heap, &cmd)) = S("cc");
-      *(da_push(heap, &cmd)) = S("-o");
-      *(da_push(heap, &cmd)) = S("build/cbuild.new");
-      *(da_push(heap, &cmd)) = S("cbuild.c");
+      cmd_append_lits(heap, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
 #if 1 // debug flags
-      *(da_push(heap, &cmd)) = S("-g");
-      *(da_push(heap, &cmd)) = S("-Wall");
-      *(da_push(heap, &cmd)) = S("-Wextra");
-      *(da_push(heap, &cmd)) = S("-Wshadow");
-      *(da_push(heap, &cmd)) = S("-fsanitize=undefined");
-      /* *(da_push(heap, &cmd)) = S("-fsanitize=address"); */
+      cmd_append_lits(heap, &cmd, "-g");
+      cmd_append_lits(heap, &cmd, "-Wall", "-Wextra", "-Wshadow");
+      cmd_append_lits(heap, &cmd, "-fsanitize=undefined");
+      cmd_append_lits(heap, &cmd, "-fsanitize=address");
 #endif
 
       if (!os_run_cmd_sync(cmd, stderr)) { os_exit(1); }

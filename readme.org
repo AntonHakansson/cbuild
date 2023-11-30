@@ -4,8 +4,8 @@ Opinionated proof-of-concept build system using C:
 - No external dependencies.
 - Think build.zig *in* C, or a Makefile on steroids. Describe how to build your project in C.
 - Heavily relies on Arena allocators for stress free memory management.
-- [WIP] No null terminated strings.
-- [WIP] Basic platform abstraction (only linux for now)
+- No null terminated strings.
+- [WIP] Basic cross-platform abstraction (only linux for now)
 
 #+begin_src shell
   cc -o cbuild cbuild.c && ./cbuild
@@ -50,3 +50,4 @@ For example:
 #+end_src
 
 All functions are defined for all platforms however they just return a null pointer.
+This is for sokols context descriptor(=sg_context_desc=) maybe we also could have a similar thing.

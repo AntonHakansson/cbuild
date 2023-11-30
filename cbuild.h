@@ -145,6 +145,17 @@ void cmd_append(Arena *arena, Command *cmd, Str arg)
   *(da_push(arena, cmd)) = arg;
 }
 
+void _cmd_append_lits(Arena *arena, Command *cmd, const char *lits[], size lits_len)
+{
+  for (size i = 0; i < lits_len; i++) {
+    Str str = str_from_cstr((char *)lits[i]);
+    *(da_push(arena, cmd)) = str;
+  }
+}
+
+#define cmd_append_lits(arena, cmd, ...) \
+  _cmd_append_lits(arena, cmd, ((const char*[]){__VA_ARGS__}), (sizeof(((const char*[]){__VA_ARGS__}))/(sizeof(const char*))))
+
 Str cmd_render(Command cmd, Write_Buffer *buf)
 {
   Str result = {0};
