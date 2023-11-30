@@ -17,6 +17,7 @@ typedef __SIZE_TYPE__    usize;
 #define alignof(s) (size)_Alignof(s)
 #define countof(s) (sizeof(s) / sizeof(*(s)))
 #define assert(c)  while((!(c))) __builtin_unreachable()
+#define return_defer(r)  { result = (r); goto defer; }
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
@@ -200,7 +201,7 @@ void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
 i32  os_open(Str filepath, Write_Buffer *stderr);
 b32  os_close(i32 fd, Write_Buffer *stderr);
-b32  os_file_exists(char *file, Write_Buffer *stderr);
+b32  os_file_exists(Str filepath, Write_Buffer *stderr);
 b32  os_mkdir_if_not_exists(char *directory, Write_Buffer *stderr);
 b32  os_rename(const char *old_path, const char *new_path, Write_Buffer *stderr);
 b32  os_needs_rebuild(const char *output_path, const char **input_paths, int input_paths_count, Write_Buffer * stderr);
@@ -541,21 +542,27 @@ b32 os_close(i32 fd, Write_Buffer *stderr)
   return 1;
 }
 
-b32 os_file_exists(char *file, Write_Buffer *stderr)
+b32 os_file_exists(Str filepath, Write_Buffer *stderr)
 {
-  struct stat statbuf = {0};
+  Arena_Mark scratch = arena_get_scratch(0, 0);
+  b32 result = 0;
 
-  if (stat(file, &statbuf) < 0) {
-    if (errno == ENOENT) return 0;
+  char *c_filepath = str_to_cstr(scratch.arena, filepath);
+  struct stat statbuf = {0};
+  if (stat(c_filepath, &statbuf) < 0) {
+    if (errno == ENOENT) { return_defer(0) };
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
-      append_str(stderr, str_from_cstr((char *)file));
+      append_str(stderr, filepath);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return -1;
+    return_defer(-1);
   }
+  return_defer(1);
 
-  return 1;
+ defer:
+  arena_pop_mark(scratch);
+  return result;
 }
 
 b32 os_write(i32 fd, u8 *buf, size len)

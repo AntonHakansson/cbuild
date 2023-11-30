@@ -31,7 +31,8 @@ int main(int argc, char **argv)
       *(da_push(heap, &cmd)) = S("-Wall");
       *(da_push(heap, &cmd)) = S("-Wextra");
       *(da_push(heap, &cmd)) = S("-Wshadow");
-      *(da_push(heap, &cmd)) = S("-fsanitize=address,undefined");
+      *(da_push(heap, &cmd)) = S("-fsanitize=undefined");
+      /* *(da_push(heap, &cmd)) = S("-fsanitize=address"); */
 #endif
 
       if (!os_run_cmd_sync(cmd, stderr)) { os_exit(1); }
@@ -48,7 +49,7 @@ int main(int argc, char **argv)
   }
 
   b32 user_requested_to_reconfigure = (argc > 1);
-  if (!os_file_exists("build/config.h", stderr) || user_requested_to_reconfigure) {
+  if (!os_file_exists(S("build/config.h"), stderr) || user_requested_to_reconfigure) {
     log_emit(stderr, LOG_INFO, S("Reconfiguring cbuild ..."));
 
     // Configure program i.e. write default build/config.h for current platform.
