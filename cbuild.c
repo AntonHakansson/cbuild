@@ -5,9 +5,9 @@
 
 int main(int argc, char **argv)
 {
-  Arena *heap = alloc_arena(8 * 1024 * 1024);
+  Arena *perm = alloc_arena(8 * 1024 * 1024); // permanent arena
   // REVIEW: Move this to global cbuild context.
-  Write_Buffer *stderr = fd_buffer(2, heap, 4 * 1024);
+  Write_Buffer *stderr = fd_buffer(2, perm, 4 * 1024);
 
   // TODO: If we are not in the directory where cbuild is, abort, or move working directory there
 
@@ -20,13 +20,13 @@ int main(int argc, char **argv)
     else if (status > 0) {
       log_emit(stderr, LOG_INFO, S("Rebuilding cbuild ..."));
 
-      Command cmd = da_init(heap, Command, 128);
-      cmd_append_lits(heap, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
+      Command cmd = da_init(perm, Command, 128);
+      cmd_append_lits(perm, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
 #if 1 // debug flags
-      cmd_append_lits(heap, &cmd, "-g");
-      cmd_append_lits(heap, &cmd, "-Wall", "-Wextra", "-Wshadow");
-      cmd_append_lits(heap, &cmd, "-fsanitize=undefined");
-      cmd_append_lits(heap, &cmd, "-fsanitize=address");
+      cmd_append_lits(perm, &cmd, "-g");
+      cmd_append_lits(perm, &cmd, "-Wall", "-Wextra", "-Wshadow");
+      cmd_append_lits(perm, &cmd, "-fsanitize=undefined");
+      cmd_append_lits(perm, &cmd, "-fsanitize=address");
 #endif
 
       if (!os_run_cmd_sync(cmd, stderr)) { os_exit(1); }
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
   }
 
   flush(stderr);
-  free_arena(heap);
+  free_arena(perm);
   free_scratch_pool();
   return 0;
 }
