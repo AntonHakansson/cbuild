@@ -32,8 +32,8 @@ int main(int argc, char **argv)
       if (!os_run_cmd_sync(cmd, stderr)) { os_exit(1); }
 
       // Swap new and old
-      if (!os_rename(S("cbuild"), S("build/cbuild.old"), stderr)) { os_exit(1); };
-      if (!os_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { os_exit(1); };
+      if (!os_rename(S("cbuild"), S("build/cbuild.old"), stderr)) { os_exit(1); }
+      if (!os_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { os_exit(1); }
 
       // Re-run yourself
       // TODO: use platform agnostic call.

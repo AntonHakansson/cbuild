@@ -158,7 +158,7 @@ void cmd_append(Arena *arena, Command *cmd, Str arg);
 void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
                       size lits_len);
 #define cmd_append_lits(arena, cmd, ...) \
-  _cmd_append_lits(arena, cmd, ((const char*[]){__VA_ARGS__}), (sizeof(((const char*[]){__VA_ARGS__}))/(sizeof(const char*))))
+  cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (sizeof(((const char*[]){__VA_ARGS__}))/(sizeof(const char*))))
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -166,7 +166,7 @@ void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
 
 u8  *os_malloc(size amount);
 void os_mfree(u8 *memory_to_free);
-void os_exit (i32 status);
+__attribute__((noreturn)) void os_exit (i32 status);
 b32  os_write(i32 fd, u8 *buf, size len);
 i32  os_open(Str filepath, Write_Buffer *stderr);
 b32  os_close(i32 fd, Write_Buffer *stderr);
@@ -191,6 +191,7 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
 
 Str str_from_cstr(char *str)
 {
+  assert(str);
   Str result = {0};
   result.buf = (u8 *)str;
 
@@ -234,7 +235,9 @@ char *str_to_cstr(Arena *a, Str s)
 
 Arena arena_init(u8 *backing, size capacity)
 {
-  Arena result = {};
+  assert(backing);
+  assert(capacity > 0);
+  Arena result = {0};
   result.at = result.backing = backing;
   result.capacity = capacity;
   ASAN_POISON_MEMORY_REGION(backing, (usize)capacity);
@@ -244,6 +247,7 @@ Arena arena_init(u8 *backing, size capacity)
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 {
+  assert(a->at >= a->backing);
   size avail = (a->backing + a->capacity) - a->at;
   size padding = -(size)((uptr)a->at) & (align - 1);
   size total   = padding + objsize * count;
@@ -300,9 +304,9 @@ void arena_pop_mark(Arena_Mark a)
   a.arena->at = a.marker;
 }
 
-__thread Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
+static __thread Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
 
-Arena *_arena_get_scratch(Arena **conflicts, size conflicts_len)
+static Arena *arena_get_scratch_(Arena **conflicts, size conflicts_len)
 {
   assert(conflicts_len < SCRATCH_ARENA_COUNT);
 
@@ -335,7 +339,7 @@ Arena *_arena_get_scratch(Arena **conflicts, size conflicts_len)
 
 Arena_Mark arena_get_scratch(Arena **conflicts, size conflicts_len)
 {
-  Arena *a = _arena_get_scratch(conflicts, conflicts_len);
+  Arena *a = arena_get_scratch_(conflicts, conflicts_len);
   Arena_Mark result = {0};
   if (a) {
    result = arena_push_mark(a);
@@ -446,7 +450,7 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
   else {
     // Relocate array
     u8 *p = arena_alloc(arena, item_size, align, (*capacity) * 2);
-#define DA_MEMORY_COPY(dst, src, bytes) for (int i = 0; i < bytes; i++) { ((char *)dst)[i] = ((char *)src)[i]; }
+#define DA_MEMORY_COPY(dst, src, bytes) do { for (int i = 0; i < bytes; i++) { ((char *)dst)[i] = ((char *)src)[i]; } } while(0)
     DA_MEMORY_COPY(p, *items, (*len) * item_size);
 #undef DA_MEMORY_COPY
     *items = (void *)p;
@@ -493,7 +497,7 @@ void cmd_append(Arena *arena, Command *cmd, Str arg) {
   *(da_push(arena, cmd)) = arg;
 }
 
-void _cmd_append_lits(Arena *arena, Command *cmd, const char *lits[],
+void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
                       size lits_len) {
   for (size i = 0; i < lits_len; i++) {
     Str str = str_from_cstr((char *)lits[i]);
@@ -590,7 +594,7 @@ b32 os_file_exists(Str filepath, Write_Buffer *stderr)
   char *c_filepath = str_to_cstr(scratch.arena, filepath);
   struct stat statbuf = {0};
   if (stat(c_filepath, &statbuf) < 0) {
-    if (errno == ENOENT) { return_defer(0); };
+    if (errno == ENOENT) { return_defer(0); }
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
       append_str(stderr, filepath);
       append_lit(stderr, ": ");
@@ -683,7 +687,7 @@ b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, Wri
   struct stat statbuf = {0};
   if (stat(c_output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
-    if (errno == ENOENT) { return_defer(1); };
+    if (errno == ENOENT) { return_defer(1); }
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
       append_str(stderr, output_path);
       append_lit(stderr, ": ");
