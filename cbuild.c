@@ -24,7 +24,7 @@ int main(int argc, char **argv)
       cmd_append_lits(perm, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
 #if 1 // debug flags
       cmd_append_lits(perm, &cmd, "-g");
-      cmd_append_lits(perm, &cmd, "-Wall", "-Wextra", "-Wshadow");
+      cmd_append_lits(perm, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
       cmd_append_lits(perm, &cmd, "-fsanitize=undefined");
       cmd_append_lits(perm, &cmd, "-fsanitize=address");
 #endif

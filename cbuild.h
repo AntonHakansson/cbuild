@@ -7,6 +7,7 @@
 // place that AFAIK does not strictly alias other types.
 //
 // REVIEW: just use stdint.h instead?
+//
 
 typedef __UINT8_TYPE__   u8;
 typedef __UINT32_TYPE__  u32;
@@ -223,7 +224,7 @@ char *str_to_cstr(Arena *a, Str s)
 //- Arena Allocator Implementation
 
 #if defined(__SANITIZE_ADDRESS__)
-/* #  include <sanitizer/asan_interface.h> */
+#  include <sanitizer/asan_interface.h>
 #  define ASAN_POISON_MEMORY_REGION(addr, size)   __asan_poison_memory_region((addr), (size))
 #  define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
 #else
@@ -244,7 +245,7 @@ __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 {
   size avail = (a->backing + a->capacity) - a->at;
-  size padding = -((uptr)a->at) & (align - 1);
+  size padding = -(size)((uptr)a->at) & (align - 1);
   size total   = padding + objsize * count;
   if (avail < total) {
     os_write(2, (u8 *)"Out of Memory", 13);
@@ -253,7 +254,7 @@ u8 *arena_alloc(Arena *a, size objsize, size align, size count)
 
   u8 *p = a->at + padding;
   a->at += total;
-  ASAN_UNPOISON_MEMORY_REGION(p, objsize * count);
+  ASAN_UNPOISON_MEMORY_REGION(p, (usize)(objsize * count));
 
   // TODO: memcpy
   for (size i = 0; i < objsize * count; i++) {
@@ -295,7 +296,7 @@ void arena_pop_mark(Arena_Mark a)
   assert(a.arena->at > a.marker);
   size len = a.arena->at - a.marker;
   assert(len >= 0);
-  ASAN_POISON_MEMORY_REGION(a.marker, len);
+  ASAN_POISON_MEMORY_REGION(a.marker, (usize)len);
   a.arena->at = a.marker;
 }
 
@@ -412,7 +413,7 @@ void append_long(Write_Buffer *b, long x)
   unsigned char *beg = end;
   long t = x>0 ? -x : x;
   do {
-    *--beg = '0' - t%10;
+    *--beg = '0' - (unsigned char)(t%10);
   } while (t /= 10);
   if (x < 0) {
     *--beg = '-';
@@ -607,7 +608,8 @@ b32 os_file_exists(Str filepath, Write_Buffer *stderr)
 b32 os_write(i32 fd, u8 *buf, size len)
 {
   for (size off = 0; off < len;) {
-    size written = write(fd, buf + off, len - off);
+    usize bytes_to_write = (usize)(len - off);
+    size written = write(fd, buf + off, bytes_to_write);
     if (written < 1) { return 0; }
     off += written;
   }
