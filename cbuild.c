@@ -1,4 +1,4 @@
-// TODO: Credit tsoding properly
+// This is free and unencumbered software released into the public domain.
 
 #define CBUILD_IMPLEMENTATION
 #include "cbuild.h"

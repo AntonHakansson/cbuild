@@ -1,53 +1,65 @@
-#+title: build.c: build.zig in C
+#+title: cbuild: Makefile on steroids in C.
 
-Opinionated proof-of-concept build system using C:
-- No external dependencies.
-- Think build.zig *in* C, or a Makefile on steroids. Describe how to build your project in C.
-- Heavily relies on Arena allocators for stress free memory management.
-- No null terminated strings.
-- [WIP] Basic cross-platform abstraction (only linux for now)
+Opinionated proof-of-concept build system/library using C.
+Describe how to build your project in C instead of a Domain Specific Language (DSL).
+No need to learn or install tools for Makefiles, CMake, Ninja, etc.
+The build tool(e.g. gnumake, cmake) and describing how to build targets(e.g. Makefiles, CMakelists.txt) are consolidated into one program (cbuild).
+
+Highlights:
+- No external dependencies; just libc and a compiler(gcc, clang, msvc).
+- Not limited by DSL. Who doesn't want render the build progress on a GPU in realtime?
+- Single header library.
+- Debug build tool and build recipe with a debugger.
+- [WIP] Cross-platform (only linux for now)
+- Reuse =cbuild.h= for scaffolding your C/C++ program with arena memory management, dynamic arrays, string-builder/slices, and cross-platform abstraction.
+
+* Quickstart
 
 #+begin_src shell
-  cc -o cbuild cbuild.c && ./cbuild
+  cc -o cbuild cbuild.c # only once!
+  ./cbuild
 #+end_src
 
-* Design considerations
+On subsequent changes to =cbuild.c= you do not have to recompile manually.
+Just rerun ~./cbuild~, and the build tool re-compiles itself.
 
-** TODO Create a thread local context struct that has information about:
-1. Scratch Arena, needed to make inferface null-terminated string free.
-2. Stderr buffered output
-3. Logging state(indentation, current write buffer)
+* Future ideas
 
-This introduces the /problem/ of having global state.
-Maybe we could still have the explicit API but just /glue/ with a global context.
+Some ideas that will probably never come to fruition.
 
-*** How does sokol abstract platforms?
+** Export minimally viable CMake for compatibility
 
-Seems like sokol implement the functions for all platforms but just return null if the
-platforms lacks support for a particular backend/feature.
-For example:
+Export the most basic cmake project for distribution.
+All Package Maintainers probably know how to make CMake work.
+
+** Metaprogramming
+
+Make it easy to introspect C code base and metaprogram i.e. parse C and output C.
+Get access to compile time type info, or seamlessly implement custom language features etc.
+Also, compared to preprocessor macros, the metaprogram, and its output, is typesafe and debuggable.
 
 #+begin_src C
-  SOKOL_API_IMPL sg_context_desc sapp_sgcontext(void) {
-      sg_context_desc desc;
-      memset(&desc, 0, sizeof(desc));
-      desc.color_format = (sg_pixel_format) sapp_color_format();
-      desc.depth_format = (sg_pixel_format) sapp_depth_format();
-      desc.sample_count = sapp_sample_count();
-      desc.metal.device = sapp_metal_get_device();
-      desc.metal.renderpass_descriptor_cb = sapp_metal_get_renderpass_descriptor;
-      desc.metal.drawable_cb = sapp_metal_get_drawable;
-      desc.d3d11.device = sapp_d3d11_get_device();
-      desc.d3d11.device_context = sapp_d3d11_get_device_context();
-      desc.d3d11.render_target_view_cb = sapp_d3d11_get_render_target_view;
-      desc.d3d11.depth_stencil_view_cb = sapp_d3d11_get_depth_stencil_view;
-      desc.wgpu.device = sapp_wgpu_get_device();
-      desc.wgpu.render_view_cb = sapp_wgpu_get_render_view;
-      desc.wgpu.resolve_view_cb = sapp_wgpu_get_resolve_view;
-      desc.wgpu.depth_stencil_view_cb = sapp_wgpu_get_depth_stencil_view;
-      return desc;
-  }
+  // foo.c
+  #ifdef CBUILD_METAPROGRAM
+  struct Slice {
+    $T *items;
+    size len;
+  };
+  #else
+  // The output of the metaprogram could be commited in the source tree
+  // to guarantee the program compiles without cbuild.
+  #include "foo.meta.c"
+  /* foo.meta.c:
+    typedef struct { char **items; size len;  } SLice_Char;
+    // .. typeinfo about Slice_Char
+    typedef struct { i32 *items; size len;  } SLice_I32;
+    // .. typeinfo about Slice_I32
+   ,*/
+  #endif
 #+end_src
 
-All functions are defined for all platforms however they just return a null pointer.
-This is for sokols context descriptor(=sg_context_desc=) maybe we also could have a similar thing.
+* References / Influences
+
+- tsoding :: nob, REBUILD_YOURSELF macro
+- nullprogram :: dynamic arrays, string builder and more
+- ryanfj :: arena memory management
