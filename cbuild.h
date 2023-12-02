@@ -4,7 +4,9 @@
 //- Types and Utils
 //
 // REVIEW: Introduce a byte type that aliases i.e. char. Right now I use u8 all over the
-// place.
+// place that AFAIK does not strictly alias other types.
+//
+// REVIEW: just use stdint.h instead?
 
 typedef __UINT8_TYPE__   u8;
 typedef __UINT32_TYPE__  u32;
@@ -22,19 +24,11 @@ typedef __SIZE_TYPE__    usize;
 #define assert(c)  while((!(c))) __builtin_unreachable()
 #define return_defer(r)  do { result = (r); goto defer; } while(0)
 
+
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
 
 #define new(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
-
-#if defined(__SANITIZE_ADDRESS__)
-#  include <sanitizer/asan_interface.h>
-#  define ASAN_POISON_MEMORY_REGION(addr, size)   __asan_poison_memory_region((addr), (size))
-#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
-#else
-#  define ASAN_POISON_MEMORY_REGION(addr, size)   ((void)(addr), (void)(size))
-#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
-#endif
 
 typedef struct {
   u8 *backing;
@@ -80,6 +74,7 @@ Str str_from_cstr(char *str);
 b32 str_equals(Str a, Str b);
 char *str_to_cstr(Arena *a, Str s);
 
+
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
 
@@ -88,7 +83,7 @@ typedef struct  {
   size capacity;
   size len;
   i32 fd;
-  _Bool error;
+  b32 error;
 } Write_Buffer;
 
 Write_Buffer *mem_buffer(Arena *a, size capacity);
@@ -101,8 +96,9 @@ void    append_str(Write_Buffer *b, Str s);
 void    append_byte(Write_Buffer *b, unsigned char c);
 void    append_long(Write_Buffer *b, long x);
 
+
 ////////////////////////////////////////////////////////////////////////////////
-//- Dynamic Array w/ Arena Allocator
+//- Dynamic Array
 
 #define da_init(a, t, cap) ({                                           \
       t s = {0};                                                        \
@@ -128,7 +124,23 @@ void    append_long(Write_Buffer *b, long x);
       (s)->items + (s)->len++;                  \
     })
 
-void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, size *__restrict len, size item_size, size align);
+void da_grow(Arena *arena, void **items, size *__restrict capacity, size *__restrict len, size item_size, size align);
+
+
+////////////////////////////////////////////////////////////////////////////////
+//- Log
+
+typedef enum Log_Level {
+  LOG_ERROR,
+  LOG_WARNING,
+  LOG_INFO,
+
+  LOG_COUNT,
+} Log_Level;
+
+void log_begin(Write_Buffer *b, Log_Level level, Str prefix);
+void log_end(Write_Buffer *b, Str suffix);
+void log_emit(Write_Buffer *b, Log_Level level, Str fmt);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,67 +152,12 @@ typedef struct Command {
   size len;
 } Command;
 
-void cmd_append(Arena *arena, Command *cmd, Str arg)
-{
-  *(da_push(arena, cmd)) = arg;
-}
-
-void _cmd_append_lits(Arena *arena, Command *cmd, const char *lits[], size lits_len)
-{
-  for (size i = 0; i < lits_len; i++) {
-    Str str = str_from_cstr((char *)lits[i]);
-    *(da_push(arena, cmd)) = str;
-  }
-}
-
+Str  cmd_render(Command cmd, Write_Buffer *buf);
+void cmd_append(Arena *arena, Command *cmd, Str arg);
+void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
+                      size lits_len);
 #define cmd_append_lits(arena, cmd, ...) \
   _cmd_append_lits(arena, cmd, ((const char*[]){__VA_ARGS__}), (sizeof(((const char*[]){__VA_ARGS__}))/(sizeof(const char*))))
-
-Str cmd_render(Command cmd, Write_Buffer *buf)
-{
-  Str result = {0};
-  result.len = buf->len;
-  result.buf = buf->buf + buf->len;
-  for (size i = 0; i < cmd.len; i++) {
-    if (i > 0) { append_byte(buf, ' '); }
-    append_str(buf, cmd.items[i]);
-  }
-  result.len = buf->len - result.len;
-  return result;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//- Log
-
-typedef enum Log_Level {
-  LOG_ERROR,
-  LOG_INFO,
-
-  LOG_COUNT,
-} Log_Level;
-
-void log_begin(Write_Buffer* b, Log_Level level, Str prefix)
-{
-  switch(level) {
-  case LOG_ERROR: { append_lit(b, "[ERROR]: "); } break;
-  case LOG_INFO:  { append_lit(b, "[INFO]: ");  } break;
-  default: assert(0 && "unreachable");
-  }
-  if (prefix.buf) append_str(b, prefix);
-}
-
-void log_end(Write_Buffer* b, Str suffix)
-{
-  if (suffix.buf) append_str(b, suffix);
-  append_byte(b, '\n');
-  flush(b);
-}
-
-void log_emit(Write_Buffer* b, Log_Level level, Str fmt)
-{
-  log_begin(b, level, fmt);
-  log_end(b, (Str){0});
-}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -228,8 +185,8 @@ b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
 
 #ifdef CBUILD_IMPLEMENTATION
 
-////////////////////////////////////////////////////////////////////////////////
-//- String slice
+///////////////////////////////////////////////////////////////////////////////
+//- String slice Implemntation
 
 Str str_from_cstr(char *str)
 {
@@ -261,8 +218,18 @@ char *str_to_cstr(Arena *a, Str s)
   return (char *)b->buf;
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
-//- Arena Allocator
+//- Arena Allocator Implementation
+
+#if defined(__SANITIZE_ADDRESS__)
+/* #  include <sanitizer/asan_interface.h> */
+#  define ASAN_POISON_MEMORY_REGION(addr, size)   __asan_poison_memory_region((addr), (size))
+#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#else
+#  define ASAN_POISON_MEMORY_REGION(addr, size)   ((void)(addr), (void)(size))
+#  define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
 
 Arena arena_init(u8 *backing, size capacity)
 {
@@ -387,7 +354,7 @@ void free_scratch_pool()
 
 
 ////////////////////////////////////////////////////////////////////////////////
-//- Buffered IO
+//- Buffered IO Implementation
 
 Write_Buffer *mem_buffer(Arena *a, size capacity)
 {
@@ -462,8 +429,9 @@ void flush(Write_Buffer *b)
   }
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
-//- Dynamic Array w/ Arena Allocator
+//- Dynamic Array Implemntation
 
 void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, size *__restrict len, size item_size, size align)
 {
@@ -484,6 +452,68 @@ void da_grow(Arena *arena, void **__restrict items, size *__restrict capacity, s
     *capacity *= 2;
   }
 }
+
+
+////////////////////////////////////////////////////////////////////////////////
+//- Log Implementation
+
+void log_begin(Write_Buffer *b, Log_Level level, Str prefix) {
+  assert(LOG_COUNT == 3 && "implement me");
+  switch (level) {
+  case LOG_ERROR: {
+    append_lit(b, "[ERROR]: ");
+  } break;
+  case LOG_WARNING: {
+    append_lit(b, "[WARNING]: ");
+  } break;
+  case LOG_INFO: {
+    append_lit(b, "[INFO]: ");
+  } break;
+  default:
+    assert(0 && "unreachable");
+  }
+  if (prefix.buf) append_str(b, prefix);
+}
+void log_end(Write_Buffer *b, Str suffix) {
+  if (suffix.buf) append_str(b, suffix);
+  append_byte(b, '\n');
+  flush(b);
+}
+void log_emit(Write_Buffer *b, Log_Level level, Str fmt) {
+  log_begin(b, level, fmt);
+  log_end(b, (Str){0});
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+//- Command Implementation
+
+void cmd_append(Arena *arena, Command *cmd, Str arg) {
+  *(da_push(arena, cmd)) = arg;
+}
+
+void _cmd_append_lits(Arena *arena, Command *cmd, const char *lits[],
+                      size lits_len) {
+  for (size i = 0; i < lits_len; i++) {
+    Str str = str_from_cstr((char *)lits[i]);
+    *(da_push(arena, cmd)) = str;
+  }
+}
+
+Str cmd_render(Command cmd, Write_Buffer *buf) {
+  Str result = {0};
+  result.len = buf->len;
+  result.buf = buf->buf + buf->len;
+  for (size i = 0; i < cmd.len; i++) {
+    if (i > 0) {
+      append_byte(buf, ' ');
+    }
+    append_str(buf, cmd.items[i]);
+  }
+  result.len = buf->len - result.len;
+  return result;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Platform Implemntation
@@ -519,8 +549,6 @@ void os_mfree(u8 *memory_to_free)
   free(memory_to_free);
 }
 
-
-/* i32 os_open(char *file, Write_Buffer *stderr) */
 i32  os_open(Str filepath, Write_Buffer *stderr)
 {
   Arena_Mark scratch = arena_get_scratch(0, 0);
