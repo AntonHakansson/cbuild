@@ -21,23 +21,26 @@ typedef int32_t   CB_i32;
 typedef int64_t   CB_i64;
 typedef uint64_t  CB_u64;
 typedef uintptr_t CB_uptr;
+// REVIEW: @portability
 typedef __PTRDIFF_TYPE__ CB_size;
 typedef __SIZE_TYPE__    CB_usize;
 #endif // CB_DEFAULT_BASIC_TYPES
 
 typedef CB_i32   CB_b32;
 
-#define sizeof(s)  (CB_size)sizeof(s)
-#define alignof(s) (CB_size)_Alignof(s)
-#define countof(s) (sizeof(s) / sizeof(*(s)))
-#define assert(c)  while((!(c))) __builtin_unreachable()
-#define return_defer(r)  do { result = (r); goto defer; } while(0)
+// Use signed values everywhere
+#define CB_sizeof(s)  (CB_size)sizeof(s)
+#define CB_countof(s) (CB_sizeof(s) / CB_sizeof(*(s)))
+ // REVIEW: @portability
+#define CB_alignof(s) (CB_size)_Alignof(s)
+#define CB_assert(c)  while((!(c))) __builtin_unreachable()
 
+#define cb_return_defer(r)  do { result = (r); goto defer; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
 
-#define new(a, t, n) (t *) arena_alloc(a, sizeof(t), alignof(t), (n))
+#define new(a, t, n) (t *) arena_alloc(a, CB_sizeof(t), CB_alignof(t), (n))
 
 typedef struct {
   CB_u8 *backing;
@@ -70,7 +73,7 @@ void free_scratch_pool();
 ////////////////////////////////////////////////////////////////////////////////
 //- String slice
 
-#define S(s)        (Str){ .buf = (CB_u8 *)(s), .len = countof((s)) - 1, }
+#define S(s)        (Str){ .buf = (CB_u8 *)(s), .len = CB_countof((s)) - 1, }
 #define S_FMT       "%.*s"
 #define S_ARG(s)    (i32)(s).len, (s).buf
 
@@ -100,7 +103,7 @@ Write_Buffer *fd_buffer(CB_i32 fd, Arena *a, CB_size capacity);
 void flush(Write_Buffer *b);
 
 void    append(Write_Buffer *b, unsigned char *src, CB_size len);
-#define append_lit(b, s) append(b, (unsigned char*)s, sizeof(s) - 1)
+#define append_lit(b, s) append(b, (unsigned char*)s, CB_sizeof(s) - 1)
 void    append_str(Write_Buffer *b, Str s);
 void    append_byte(Write_Buffer *b, unsigned char c);
 void    append_long(Write_Buffer *b, long x);
@@ -113,7 +116,7 @@ void    append_long(Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), sizeof(*s.items), alignof(typeof(*s.items)), s.capacity); \
+        arena_alloc((a), CB_sizeof(*s.items), CB_alignof(typeof(*s.items)), s.capacity); \
       s;                                                                \
   })
 
@@ -122,14 +125,14 @@ void    append_long(Write_Buffer *b, long x);
       typeof(s) _s = s;                                                 \
       if (_s->len >= _s->capacity) {                                    \
         da_grow((a), (void **)&_s->items, &_s->capacity, &_s->len,      \
-                sizeof(*_s->items), alignof(typeof(*_s->items)));       \
+                CB_sizeof(*_s->items), CB_alignof(typeof(*_s->items)));       \
       }                                                                 \
       _s->items + _s->len++;                                            \
     })
 
 // Assumes new item fits in capacity
 #define da_push_unsafe(s) ({                    \
-      assert((s)->len < (s)->capacity);         \
+      CB_assert((s)->len < (s)->capacity);         \
       (s)->items + (s)->len++;                  \
     })
 
@@ -166,7 +169,7 @@ void cmd_append(Arena *arena, Command *cmd, Str arg);
 void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
                       CB_size lits_len);
 #define cmd_append_lits(arena, cmd, ...) \
-  cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (sizeof(((const char*[]){__VA_ARGS__}))/(sizeof(const char*))))
+  cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,7 +202,7 @@ CB_b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
 
 Str str_from_cstr(char *str)
 {
-  assert(str);
+  CB_assert(str);
   Str result = {0};
   result.buf = (CB_u8 *)str;
 
@@ -243,8 +246,8 @@ char *str_to_cstr(Arena *a, Str s)
 
 Arena arena_init(CB_u8 *backing, CB_size capacity)
 {
-  assert(backing);
-  assert(capacity > 0);
+  CB_assert(backing);
+  CB_assert(capacity > 0);
   Arena result = {0};
   result.at = result.backing = backing;
   result.capacity = capacity;
@@ -255,7 +258,7 @@ Arena arena_init(CB_u8 *backing, CB_size capacity)
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 CB_u8 *arena_alloc(Arena *a, CB_size objsize, CB_size align, CB_size count)
 {
-  assert(a->at >= a->backing);
+  CB_assert(a->at >= a->backing);
   CB_size avail = (a->backing + a->capacity) - a->at;
   CB_size padding = -(CB_size)((CB_uptr)a->at) & (align - 1);
   CB_size total   = padding + objsize * count;
@@ -305,9 +308,9 @@ Arena_Mark arena_push_mark(Arena *a)
 
 void arena_pop_mark(Arena_Mark a)
 {
-  assert(a.arena->at > a.marker);
+  CB_assert(a.arena->at > a.marker);
   CB_size len = a.arena->at - a.marker;
-  assert(len >= 0);
+  CB_assert(len >= 0);
   ASAN_POISON_MEMORY_REGION(a.marker, (CB_usize)len);
   a.arena->at = a.marker;
 }
@@ -316,7 +319,7 @@ static __thread Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
 
 static Arena *arena_get_scratch_(Arena **conflicts, CB_size conflicts_len)
 {
-  assert(conflicts_len < SCRATCH_ARENA_COUNT);
+  CB_assert(conflicts_len < SCRATCH_ARENA_COUNT);
 
   Arena **scratch_pool = g_thread_scratch_pool;
 
@@ -341,7 +344,7 @@ static Arena *arena_get_scratch_(Arena **conflicts, CB_size conflicts_len)
   if (conflicts_len == 0) {
     return scratch_pool[0];
   }
-  assert(0 && "unreachable if care was taken to provide conflicting arenas.");
+  CB_assert(0 && "unreachable if care was taken to provide conflicting arenas.");
   return 0;
 }
 
@@ -389,7 +392,7 @@ Write_Buffer *fd_buffer(CB_i32 fd, Arena *a, CB_size capacity)
 
 void append(Write_Buffer *b, unsigned char *src, CB_size len)
 {
-  assert(b);
+  CB_assert(b);
   unsigned char *end = src + len;
   while (!b->error && src < end) {
     CB_size left = (end - src);
@@ -421,7 +424,7 @@ void append_byte(Write_Buffer *b, unsigned char c)
 void append_long(Write_Buffer *b, long x)
 {
   unsigned char tmp[64];
-  unsigned char *end = tmp + sizeof(tmp);
+  unsigned char *end = tmp + CB_sizeof(tmp);
   unsigned char *beg = end;
   long t = x>0 ? -x : x;
   do {
@@ -448,7 +451,7 @@ void flush(Write_Buffer *b)
 
 void da_grow(Arena *arena, void **__restrict items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align)
 {
-  assert(*items != 0 && *capacity > 0);
+  CB_assert(*items != 0 && *capacity > 0);
   CB_u8 *items_end = (((CB_u8*)(*items)) + (item_size * (*len)));
   if (arena->at == items_end) {
     // Extend in place, no allocation occured between da_grow calls
@@ -472,7 +475,7 @@ void da_grow(Arena *arena, void **__restrict items, CB_size *__restrict capacity
 //- Log Implementation
 
 void log_begin(Write_Buffer *b, Log_Level level, Str prefix) {
-  assert(LOG_COUNT == 3 && "implement me");
+  CB_assert(LOG_COUNT == 3 && "implement me");
   switch (level) {
   case LOG_ERROR: {
     append_lit(b, "[ERROR]: ");
@@ -484,7 +487,7 @@ void log_begin(Write_Buffer *b, Log_Level level, Str prefix) {
     append_lit(b, "[INFO]: ");
   } break;
   default:
-    assert(0 && "unreachable");
+    CB_assert(0 && "unreachable");
   }
   if (prefix.buf) append_str(b, prefix);
 }
@@ -576,9 +579,9 @@ CB_i32  os_open(Str filepath, Write_Buffer *stderr)
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return_defer(0);
+    cb_return_defer(0);
   }
-  return_defer(fd);
+  cb_return_defer(fd);
 
  defer:
   arena_pop_mark(scratch);
@@ -607,15 +610,15 @@ CB_b32 os_file_exists(Str filepath, Write_Buffer *stderr)
   char *c_filepath = str_to_cstr(scratch.arena, filepath);
   struct stat statbuf = {0};
   if (stat(c_filepath, &statbuf) < 0) {
-    if (errno == ENOENT) { return_defer(0); }
+    if (errno == ENOENT) { cb_return_defer(0); }
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
       append_str(stderr, filepath);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return_defer(-1);
+    cb_return_defer(-1);
   }
-  return_defer(1);
+  cb_return_defer(1);
 
  defer:
   arena_pop_mark(scratch);
@@ -647,13 +650,13 @@ CB_b32 os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr)
   int ok = mkdir(c_directory, 0755);
   if (ok < 0) {
     if (errno == EEXIST) {
-      return_defer(1);
+      cb_return_defer(1);
     }
 
     log_begin(stderr, LOG_ERROR, S("Could not create directory \""));
       append_str(stderr, directory);
     log_end(stderr, S("\""));
-    return_defer(0);
+    cb_return_defer(0);
   }
 
   result = 1;
@@ -681,9 +684,9 @@ CB_b32 os_rename(Str old_path, Str new_path, Write_Buffer *stderr)
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return_defer(0);
+    cb_return_defer(0);
   }
-  return_defer(1);
+  cb_return_defer(1);
 
  defer:
   arena_pop_mark(scratch);
@@ -700,13 +703,13 @@ CB_b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, 
   struct stat statbuf = {0};
   if (stat(c_output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
-    if (errno == ENOENT) { return_defer(1); }
+    if (errno == ENOENT) { cb_return_defer(1); }
     log_begin(stderr, LOG_ERROR, S("Could not stat "));
       append_str(stderr, output_path);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    return_defer(-1);
+    cb_return_defer(-1);
   }
   CB_i64 output_path_time = statbuf.st_mtime;
 
@@ -720,11 +723,11 @@ CB_b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, 
         append_lit(stderr, ": ");
         append_str(stderr, str_from_cstr(strerror(errno)));
       log_end(stderr, S(""));
-      return_defer(-1);
+      cb_return_defer(-1);
     }
     CB_i64 input_path_time = statbuf.st_mtime;
     // NOTE: if even a single input_path is fresher than output_path that's 100% rebuild
-    if (input_path_time > output_path_time) return_defer(1);
+    if (input_path_time > output_path_time) cb_return_defer(1);
   }
 
  defer:
@@ -734,7 +737,7 @@ CB_b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, 
 
 int os_run_cmd_async(Command command, Write_Buffer *stderr)
 {
-  assert(command.len >= 1);
+  CB_assert(command.len >= 1);
 
   log_begin(stderr, LOG_INFO, S("CMD: "));
     cmd_render(command, stderr);
@@ -756,7 +759,7 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
       for (i = 0; i < command.len; i++) {
         cmd_null[i] = str_to_cstr(scratch.arena, command.items[i]);
       }
-      assert(i < 512);
+      CB_assert(i < 512);
       cmd_null[i] = 0;
     }
 
@@ -766,7 +769,7 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
       log_end(stderr, (Str){0});
       os_exit(1);
     }
-    assert(0 && "unreachable");
+    CB_assert(0 && "unreachable");
   }
 
   return cpid;

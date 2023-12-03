@@ -15,7 +15,7 @@ int main(int argc, char **argv)
     if (!os_mkdir_if_not_exists(S("build"), stderr)) os_exit(1);
 
     Str cbuild_sources[2] = { S("cbuild.c"), S("cbuild.h"), };
-    int status = os_needs_rebuild(S("cbuild"), cbuild_sources, countof(cbuild_sources), stderr);
+    int status = os_needs_rebuild(S("cbuild"), cbuild_sources, CB_countof(cbuild_sources), stderr);
     if (status < 0) { os_exit(1); }
     else if (status > 0) {
       log_emit(stderr, LOG_INFO, S("Rebuilding cbuild ..."));
@@ -38,7 +38,7 @@ int main(int argc, char **argv)
       // Re-run yourself
       // TODO: use platform agnostic call.
       execv(argv[0], argv);
-      assert(0 && "unreachable");
+      CB_assert(0 && "unreachable");
     }
   }
 
