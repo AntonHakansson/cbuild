@@ -46,45 +46,45 @@ typedef struct {
   CB_u8 *backing;
   CB_u8 *at;
   CB_size capacity;
-} Arena;
+} CB_Arena;
 
-Arena *alloc_arena(CB_size capacity);
-void   free_arena(Arena *arena);
+CB_Arena *cb_alloc_arena(CB_size capacity);
+void   cb_free_arena(CB_Arena *arena);
 
-Arena arena_init(CB_u8 *backing, CB_size capacity);
+CB_Arena cb_arena_init(CB_u8 *backing, CB_size capacity);
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
-CB_u8 *arena_alloc(Arena *a, CB_size objsize, CB_size align, CB_size count);
+CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count);
 
 typedef struct {
-  Arena *arena;
+  CB_Arena *arena;
   CB_u8 *marker;
-} Arena_Mark;
+} CB_Arena_Mark;
 
-Arena_Mark arena_push_mark(Arena *a);
-void arena_pop_mark(Arena_Mark a);
+CB_Arena_Mark cb_arena_push_mark(CB_Arena *a);
+void cb_arena_pop_mark(CB_Arena_Mark a);
 
 #define SCRATCH_ARENA_COUNT 2
 #define SCRATCH_ARENA_CAPACITY (8 * 1024 * 1024)
 
-Arena_Mark arena_scratch(Arena **conflicts, CB_size conflicts_len);
-void free_scratch_pool();
+CB_Arena_Mark cb_arena_scratch(CB_Arena **conflicts, CB_size conflicts_len);
+void cb_free_scratch_pool();
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- String slice
 
-#define S(s)        (Str){ .buf = (CB_u8 *)(s), .len = CB_countof((s)) - 1, }
+#define S(s)        (CB_Str){ .buf = (CB_u8 *)(s), .len = CB_countof((s)) - 1, }
 #define S_FMT       "%.*s"
 #define S_ARG(s)    (i32)(s).len, (s).buf
 
 typedef struct {
   CB_u8 *buf;
   CB_size len;
-} Str;
+} CB_Str;
 
-Str str_from_cstr(char *str);
-CB_b32 str_equals(Str a, Str b);
-char *str_to_cstr(Arena *a, Str s);
+CB_Str cb_str_from_cstr(char *str);
+CB_b32 cb_str_equals(CB_Str a, CB_Str b);
+char *cb_str_to_cstr(CB_Arena *a, CB_Str s);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -96,101 +96,105 @@ typedef struct  {
   CB_size len;
   CB_i32 fd;
   CB_b32 error;
-} Write_Buffer;
+} CB_Write_Buffer;
 
-Write_Buffer *mem_buffer(Arena *a, CB_size capacity);
-Write_Buffer *fd_buffer(CB_i32 fd, Arena *a, CB_size capacity);
-void flush(Write_Buffer *b);
+CB_Write_Buffer *cb_mem_buffer(CB_Arena *a, CB_size capacity);
+CB_Write_Buffer *cb_fd_buffer(CB_i32 fd, CB_Arena *a, CB_size capacity);
+void cb_flush(CB_Write_Buffer *b);
 
-void    append(Write_Buffer *b, unsigned char *src, CB_size len);
-#define append_lit(b, s) append(b, (unsigned char*)s, CB_sizeof(s) - 1)
-void    append_str(Write_Buffer *b, Str s);
-void    append_byte(Write_Buffer *b, unsigned char c);
-void    append_long(Write_Buffer *b, long x);
+void    cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len);
+#define cb_append_lit(b, s) cb_append(b, (unsigned char*)s, CB_sizeof(s) - 1)
+void    cb_append_str(CB_Write_Buffer *b, CB_Str s);
+void    cb_append_byte(CB_Write_Buffer *b, unsigned char c);
+void    cb_append_long(CB_Write_Buffer *b, long x);
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array
 
-#define da_init(a, t, cap) ({                                           \
+#define cb_da_init(a, t, cap) ({                                        \
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a), CB_sizeof(*s.items), CB_alignof(typeof(*s.items)), s.capacity); \
+        arena_alloc((a),                                                \
+                    CB_sizeof(s.items[0]),                              \
+                    CB_alignof(typeof(s.items[0])),                     \
+                    s.capacity);                                        \
       s;                                                                \
-  })
+})
 
 // Allocates on demand
-#define da_push(a, s) ({                                                \
+#define cb_push(a, s) ({                                                \
       typeof(s) _s = s;                                                 \
       if (_s->len >= _s->capacity) {                                    \
-        da_grow((a), (void **)&_s->items, &_s->capacity, &_s->len,      \
-                CB_sizeof(*_s->items), CB_alignof(typeof(*_s->items)));       \
+        cb_da_grow((a), (void **)&_s->items, &_s->capacity, &_s->len,   \
+                   CB_sizeof(_s->items[0]),                             \
+                   CB_alignof(typeof(_s->items[0])));                   \
       }                                                                 \
       _s->items + _s->len++;                                            \
     })
 
 // Assumes new item fits in capacity
-#define da_push_unsafe(s) ({                    \
+#define da_push_unsafe(s) ({                       \
       CB_assert((s)->len < (s)->capacity);         \
-      (s)->items + (s)->len++;                  \
+      (s)->items + (s)->len++;                     \
     })
 
-void da_grow(Arena *arena, void **items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align);
+void cb_da_grow(CB_Arena *arena, void **items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align);
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Log
 
-typedef enum Log_Level {
-  LOG_ERROR,
-  LOG_WARNING,
-  LOG_INFO,
+typedef enum CB_Log_Level {
+  CB_LOG_ERROR,
+  CB_LOG_WARNING,
+  CB_LOG_INFO,
 
-  LOG_COUNT,
-} Log_Level;
+  CB_LOG_COUNT,
+} CB_Log_Level;
 
-void log_begin(Write_Buffer *b, Log_Level level, Str prefix);
-void log_end(Write_Buffer *b, Str suffix);
-void log_emit(Write_Buffer *b, Log_Level level, Str fmt);
+void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level, CB_Str prefix);
+void cb_log_end(CB_Write_Buffer *b, CB_Str suffix);
+void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt);
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Command
 
-typedef struct Command {
-  Str *items;
+typedef struct CB_Command {
+  CB_Str *items;
   CB_size capacity;
   CB_size len;
-} Command;
+} CB_Command;
 
-Str  cmd_render(Command cmd, Write_Buffer *buf);
-void cmd_append(Arena *arena, Command *cmd, Str arg);
-void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
+CB_Str  cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
+void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg);
+void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
                       CB_size lits_len);
-#define cmd_append_lits(arena, cmd, ...) \
-  cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
+#define cb_cmd_append_lits(arena, cmd, ...) \
+  cb_cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Platform
 
-CB_u8  *os_malloc(CB_size amount);
-void os_mfree(CB_u8 *memory_to_free);
-__attribute__((noreturn)) void os_exit (CB_i32 status);
-CB_b32  os_write(CB_i32 fd, CB_u8 *buf, CB_size len);
-CB_i32  os_open(Str filepath, Write_Buffer *stderr);
-CB_b32  os_close(CB_i32 fd, Write_Buffer *stderr);
-CB_b32  os_file_exists(Str filepath, Write_Buffer *stderr);
-CB_b32  os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr);
-CB_b32  os_rename(Str old_path, Str new_path, Write_Buffer *stderr);
-CB_b32  os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, Write_Buffer *stderr);
+CB_u8  *cb_malloc(CB_size amount);
+void cb_mfree(CB_u8 *memory_to_free);
+__attribute__((noreturn)) void cb_exit (CB_i32 status);
+CB_b32  cb_write(CB_i32 fd, CB_u8 *buf, CB_size len);
+CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr);
+CB_b32  cb_close(CB_i32 fd, CB_Write_Buffer *stderr);
+CB_b32  cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr);
+CB_b32  cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr);
+CB_b32  cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr);
+CB_b32  cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr);
 
-#define OS_INVALID_PROC (-1)
-typedef int OS_Proc;
-int os_run_cmd_async(Command command, Write_Buffer *stderr);
-CB_b32 os_run_cmd_sync(Command command, Write_Buffer* stderr);
-CB_b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
+#define CB_INVALID_PROC (-1)
+typedef int CB_Proc;
+int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr);
+CB_b32 cb_cmd_run_sync(CB_Command command, CB_Write_Buffer* stderr);
+CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr);
 
 
 
@@ -200,10 +204,10 @@ CB_b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr);
 ///////////////////////////////////////////////////////////////////////////////
 //- String slice Implemntation
 
-Str str_from_cstr(char *str)
+CB_Str cb_str_from_cstr(char *str)
 {
   CB_assert(str);
-  Str result = {0};
+  CB_Str result = {0};
   result.buf = (CB_u8 *)str;
 
   while (*str) {
@@ -214,7 +218,7 @@ Str str_from_cstr(char *str)
   return result;
 }
 
-CB_b32 str_equals(Str a, Str b)
+CB_b32 str_equals(CB_Str a, CB_Str b)
 {
   if (a.len != b.len) { return 0; }
   for (CB_size i = 0; i < a.len; i++) {
@@ -223,11 +227,11 @@ CB_b32 str_equals(Str a, Str b)
   return 1;
 }
 
-char *str_to_cstr(Arena *a, Str s)
+char *cb_str_to_cstr(CB_Arena *a, CB_Str s)
 {
-  Write_Buffer *b = mem_buffer(a, s.len + 1);
-  append_str(b, s);
-  append_byte(b, '\0');
+  CB_Write_Buffer *b = cb_mem_buffer(a, s.len + 1);
+  cb_append_str(b, s);
+  cb_append_byte(b, '\0');
   return (char *)b->buf;
 }
 
@@ -244,11 +248,11 @@ char *str_to_cstr(Arena *a, Str s)
 #  define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif
 
-Arena arena_init(CB_u8 *backing, CB_size capacity)
+CB_Arena arena_init(CB_u8 *backing, CB_size capacity)
 {
   CB_assert(backing);
   CB_assert(capacity > 0);
-  Arena result = {0};
+  CB_Arena result = {0};
   result.at = result.backing = backing;
   result.capacity = capacity;
   ASAN_POISON_MEMORY_REGION(backing, (CB_usize)capacity);
@@ -256,15 +260,15 @@ Arena arena_init(CB_u8 *backing, CB_size capacity)
 }
 
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
-CB_u8 *arena_alloc(Arena *a, CB_size objsize, CB_size align, CB_size count)
+CB_u8 *arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count)
 {
   CB_assert(a->at >= a->backing);
   CB_size avail = (a->backing + a->capacity) - a->at;
   CB_size padding = -(CB_size)((CB_uptr)a->at) & (align - 1);
   CB_size total   = padding + objsize * count;
   if (avail < total) {
-    os_write(2, (CB_u8 *)"Out of Memory", 13);
-    os_exit(1);
+    cb_write(2, (CB_u8 *)"Out of Memory", 13);
+    cb_exit(1);
   }
 
   CB_u8 *p = a->at + padding;
@@ -279,34 +283,34 @@ CB_u8 *arena_alloc(Arena *a, CB_size objsize, CB_size align, CB_size count)
   return p;
 }
 
-Arena *alloc_arena(CB_size capacity)
+CB_Arena *alloc_arena(CB_size capacity)
 {
-  Arena *result = 0;
-  CB_u8 *mem = os_malloc(capacity);
-  Arena temp = arena_init(mem, capacity);
-  result = new(&temp, Arena, 1);
+  CB_Arena *result = 0;
+  CB_u8 *mem = cb_malloc(capacity);
+  CB_Arena temp = arena_init(mem, capacity);
+  result = new(&temp, CB_Arena, 1);
   *result = temp;
   return result;
 }
 
-void free_arena(Arena *arena)
+void free_arena(CB_Arena *arena)
 {
   CB_u8 *to_free = arena->backing;
   // TODO: memset here
   { arena->backing = arena->at = 0;
     arena->capacity = 0; }
-  os_mfree(to_free);
+  cb_mfree(to_free);
 }
 
-Arena_Mark arena_push_mark(Arena *a)
+CB_Arena_Mark arena_push_mark(CB_Arena *a)
 {
-  Arena_Mark result = {0};
+  CB_Arena_Mark result = {0};
   result.arena = a;
   result.marker = a->at;
   return result;
 }
 
-void arena_pop_mark(Arena_Mark a)
+void arena_pop_mark(CB_Arena_Mark a)
 {
   CB_assert(a.arena->at > a.marker);
   CB_size len = a.arena->at - a.marker;
@@ -315,13 +319,13 @@ void arena_pop_mark(Arena_Mark a)
   a.arena->at = a.marker;
 }
 
-static __thread Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
+static __thread CB_Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
 
-static Arena *arena_get_scratch_(Arena **conflicts, CB_size conflicts_len)
+static CB_Arena *arena_get_scratch_(CB_Arena **conflicts, CB_size conflicts_len)
 {
   CB_assert(conflicts_len < SCRATCH_ARENA_COUNT);
 
-  Arena **scratch_pool = g_thread_scratch_pool;
+  CB_Arena **scratch_pool = g_thread_scratch_pool;
 
   if (scratch_pool[0] == 0) {
     for (CB_size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
@@ -348,10 +352,10 @@ static Arena *arena_get_scratch_(Arena **conflicts, CB_size conflicts_len)
   return 0;
 }
 
-Arena_Mark arena_get_scratch(Arena **conflicts, CB_size conflicts_len)
+CB_Arena_Mark arena_get_scratch(CB_Arena **conflicts, CB_size conflicts_len)
 {
-  Arena *a = arena_get_scratch_(conflicts, conflicts_len);
-  Arena_Mark result = {0};
+  CB_Arena *a = arena_get_scratch_(conflicts, conflicts_len);
+  CB_Arena_Mark result = {0};
   if (a) {
    result = arena_push_mark(a);
   }
@@ -361,9 +365,9 @@ Arena_Mark arena_get_scratch(Arena **conflicts, CB_size conflicts_len)
 void free_scratch_pool()
 {
   for (CB_size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
-    Arena *a = g_thread_scratch_pool[i];
+    CB_Arena *a = g_thread_scratch_pool[i];
     if (a) {
-      os_mfree(a->backing);
+      cb_mfree(a->backing);
     }
   }
 }
@@ -372,25 +376,25 @@ void free_scratch_pool()
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO Implementation
 
-Write_Buffer *mem_buffer(Arena *a, CB_size capacity)
+CB_Write_Buffer *cb_mem_buffer(CB_Arena *a, CB_size capacity)
 {
-  Write_Buffer *result = new(a, Write_Buffer, 1);
+  CB_Write_Buffer *result = new(a, CB_Write_Buffer, 1);
   result->buf = new(a, CB_u8, capacity);
   result->capacity = capacity;
   result->fd = -1;
   return result;
 }
 
-Write_Buffer *fd_buffer(CB_i32 fd, Arena *a, CB_size capacity)
+CB_Write_Buffer *cb_fd_buffer(CB_i32 fd, CB_Arena *a, CB_size capacity)
 {
-  Write_Buffer *result = new(a, Write_Buffer, 1);
+  CB_Write_Buffer *result = new(a, CB_Write_Buffer, 1);
   result->buf = new(a, CB_u8, capacity);
   result->capacity = capacity;
   result->fd = fd;
   return result;
 }
 
-void append(Write_Buffer *b, unsigned char *src, CB_size len)
+void cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len)
 {
   CB_assert(b);
   unsigned char *end = src + len;
@@ -406,22 +410,22 @@ void append(Write_Buffer *b, unsigned char *src, CB_size len)
     src += amount;
 
     if (amount < left) {
-      flush(b);
+      cb_flush(b);
     }
   }
 }
 
-void append_str(Write_Buffer *b, Str s)
+void cb_append_str(CB_Write_Buffer *b, CB_Str s)
 {
-  append(b, s.buf, s.len);
+  cb_append(b, s.buf, s.len);
 }
 
-void append_byte(Write_Buffer *b, unsigned char c)
+void cb_append_byte(CB_Write_Buffer *b, unsigned char c)
 {
-  append(b, &c, 1);
+  cb_append(b, &c, 1);
 }
 
-void append_long(Write_Buffer *b, long x)
+void cb_append_long(CB_Write_Buffer *b, long x)
 {
   unsigned char tmp[64];
   unsigned char *end = tmp + CB_sizeof(tmp);
@@ -433,14 +437,14 @@ void append_long(Write_Buffer *b, long x)
   if (x < 0) {
     *--beg = '-';
   }
-  append(b, beg, end-beg);
+  cb_append(b, beg, end-beg);
 }
 
-void flush(Write_Buffer *b)
+void cb_flush(CB_Write_Buffer *b)
 {
   b->error |= b->fd < 0;
   if (!b->error && b->len) {
-    b->error |= !os_write(b->fd, b->buf, b->len);
+    b->error |= !cb_write(b->fd, b->buf, b->len);
     b->len = 0;
   }
 }
@@ -449,7 +453,7 @@ void flush(Write_Buffer *b)
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array Implemntation
 
-void da_grow(Arena *arena, void **__restrict items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align)
+void cb_da_grow(CB_Arena *arena, void **__restrict items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align)
 {
   CB_assert(*items != 0 && *capacity > 0);
   CB_u8 *items_end = (((CB_u8*)(*items)) + (item_size * (*len)));
@@ -474,58 +478,63 @@ void da_grow(Arena *arena, void **__restrict items, CB_size *__restrict capacity
 ////////////////////////////////////////////////////////////////////////////////
 //- Log Implementation
 
-void log_begin(Write_Buffer *b, Log_Level level, Str prefix) {
-  CB_assert(LOG_COUNT == 3 && "implement me");
+void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level, CB_Str prefix)
+{
+  CB_assert(CB_LOG_COUNT == 3 && "implement me");
   switch (level) {
-  case LOG_ERROR: {
-    append_lit(b, "[ERROR]: ");
+  case CB_LOG_ERROR: {
+    cb_append_lit(b, "[ERROR]: ");
   } break;
-  case LOG_WARNING: {
-    append_lit(b, "[WARNING]: ");
+  case CB_LOG_WARNING: {
+    cb_append_lit(b, "[WARNING]: ");
   } break;
-  case LOG_INFO: {
-    append_lit(b, "[INFO]: ");
+  case CB_LOG_INFO: {
+    cb_append_lit(b, "[INFO]: ");
   } break;
   default:
     CB_assert(0 && "unreachable");
   }
-  if (prefix.buf) append_str(b, prefix);
+  if (prefix.buf) cb_append_str(b, prefix);
 }
-void log_end(Write_Buffer *b, Str suffix) {
-  if (suffix.buf) append_str(b, suffix);
-  append_byte(b, '\n');
-  flush(b);
+
+void cb_log_end(CB_Write_Buffer *b, CB_Str suffix)
+{
+  if (suffix.buf) cb_append_str(b, suffix);
+  cb_append_byte(b, '\n');
+  cb_flush(b);
 }
-void log_emit(Write_Buffer *b, Log_Level level, Str fmt) {
-  log_begin(b, level, fmt);
-  log_end(b, (Str){0});
+
+void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt)
+{
+  cb_log_begin(b, level, fmt);
+  cb_log_end(b, (CB_Str){0});
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Command Implementation
 
-void cmd_append(Arena *arena, Command *cmd, Str arg) {
-  *(da_push(arena, cmd)) = arg;
+void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg) {
+  *(cb_push(arena, cmd)) = arg;
 }
 
-void cmd_append_lits_(Arena *arena, Command *cmd, const char *lits[],
+void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
                       CB_size lits_len) {
   for (CB_size i = 0; i < lits_len; i++) {
-    Str str = str_from_cstr((char *)lits[i]);
-    *(da_push(arena, cmd)) = str;
+    CB_Str str = cb_str_from_cstr((char *)lits[i]);
+    *(cb_push(arena, cmd)) = str;
   }
 }
 
-Str cmd_render(Command cmd, Write_Buffer *buf) {
-  Str result = {0};
+CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf) {
+  CB_Str result = {0};
   result.len = buf->len;
   result.buf = buf->buf + buf->len;
   for (CB_size i = 0; i < cmd.len; i++) {
     if (i > 0) {
-      append_byte(buf, ' ');
+      cb_append_byte(buf, ' ');
     }
-    append_str(buf, cmd.items[i]);
+    cb_append_str(buf, cmd.items[i]);
   }
   result.len = buf->len - result.len;
   return result;
@@ -551,34 +560,34 @@ Str cmd_render(Command cmd, Write_Buffer *buf) {
 #include <errno.h>
 #include <fcntl.h>
 
-CB_u8 *os_malloc(CB_size amount)
+CB_u8 *cb_malloc(CB_size amount)
 {
   CB_u8 *mem = (CB_u8 *)malloc((CB_usize)amount);
   if (mem == 0) {
-    os_write(2, (CB_u8 *)"Out of memory\n", 15);
-    os_exit(1);
+    cb_write(2, (CB_u8 *)"Out of memory\n", 15);
+    cb_exit(1);
   }
   return mem;
 }
 
-void os_mfree(CB_u8 *memory_to_free)
+void cb_mfree(CB_u8 *memory_to_free)
 {
   free(memory_to_free);
 }
 
-CB_i32  os_open(Str filepath, Write_Buffer *stderr)
+CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
   CB_i32 result = 0;
 
-  char *c_filepath = str_to_cstr(scratch.arena, filepath);
+  char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
   CB_i32 fd = open(c_filepath, O_RDWR | O_CREAT | O_TRUNC, 0755);
   if (fd < 0) {
-    log_begin(stderr, LOG_ERROR, S("Could not open file "));
-      append_str(stderr, filepath);
-      append_lit(stderr, ": ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
+      cb_append_str(stderr, filepath);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
     cb_return_defer(0);
   }
   cb_return_defer(fd);
@@ -588,34 +597,34 @@ CB_i32  os_open(Str filepath, Write_Buffer *stderr)
   return result;
 }
 
-CB_b32 os_close(CB_i32 fd, Write_Buffer *stderr)
+CB_b32 cb_close(CB_i32 fd, CB_Write_Buffer *stderr)
 {
   CB_i32 status = close(fd);
   if (status < 0) {
-    log_begin(stderr, LOG_ERROR, S("Could not close file (fd "));
-      append_long(stderr, fd);
-      append_lit(stderr, "): ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not close file (fd "));
+      cb_append_long(stderr, fd);
+      cb_append_lit(stderr, "): ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
     return 0;
   }
   return 1;
 }
 
-CB_b32 os_file_exists(Str filepath, Write_Buffer *stderr)
+CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
-  char *c_filepath = str_to_cstr(scratch.arena, filepath);
+  char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
   struct stat statbuf = {0};
   if (stat(c_filepath, &statbuf) < 0) {
     if (errno == ENOENT) { cb_return_defer(0); }
-    log_begin(stderr, LOG_ERROR, S("Could not stat "));
-      append_str(stderr, filepath);
-      append_lit(stderr, ": ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
+      cb_append_str(stderr, filepath);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
     cb_return_defer(-1);
   }
   cb_return_defer(1);
@@ -625,7 +634,7 @@ CB_b32 os_file_exists(Str filepath, Write_Buffer *stderr)
   return result;
 }
 
-CB_b32 os_write(CB_i32 fd, CB_u8 *buf, CB_size len)
+CB_b32 cb_write(CB_i32 fd, CB_u8 *buf, CB_size len)
 {
   for (CB_size off = 0; off < len;) {
     CB_usize bytes_to_write = (CB_usize)(len - off);
@@ -636,54 +645,54 @@ CB_b32 os_write(CB_i32 fd, CB_u8 *buf, CB_size len)
   return 1;
 }
 
-void os_exit(int status)
+void cb_exit(int status)
 {
   exit(status);
 }
 
-CB_b32 os_mkdir_if_not_exists(Str directory, Write_Buffer *stderr)
+CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
-  char *c_directory = str_to_cstr(scratch.arena, directory);
+  char *c_directory = cb_str_to_cstr(scratch.arena, directory);
   int ok = mkdir(c_directory, 0755);
   if (ok < 0) {
     if (errno == EEXIST) {
       cb_return_defer(1);
     }
 
-    log_begin(stderr, LOG_ERROR, S("Could not create directory \""));
-      append_str(stderr, directory);
-    log_end(stderr, S("\""));
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not create directory \""));
+      cb_append_str(stderr, directory);
+    cb_log_end(stderr, S("\""));
     cb_return_defer(0);
   }
 
   result = 1;
-  log_begin(stderr, LOG_INFO, S("Created directory \""));
-    append_str(stderr, directory);
-  log_end(stderr, S("\""));
+  cb_log_begin(stderr, CB_LOG_INFO, S("Created directory \""));
+    cb_append_str(stderr, directory);
+  cb_log_end(stderr, S("\""));
 
  defer:
   arena_pop_mark(scratch);
   return result;
 }
 
-CB_b32 os_rename(Str old_path, Str new_path, Write_Buffer *stderr)
+CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
-  char *c_old_path = str_to_cstr(scratch.arena, old_path);
-  char *c_new_path = str_to_cstr(scratch.arena, new_path);
+  char *c_old_path = cb_str_to_cstr(scratch.arena, old_path);
+  char *c_new_path = cb_str_to_cstr(scratch.arena, new_path);
   if (rename(c_old_path, c_new_path) < 0) {
-    log_begin(stderr, LOG_ERROR, S("Could not rename "));
-      append_str(stderr, old_path);
-      append_lit(stderr, " to ");
-      append_str(stderr, new_path);
-      append_lit(stderr, ": ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not rename "));
+      cb_append_str(stderr, old_path);
+      cb_append_lit(stderr, " to ");
+      cb_append_str(stderr, new_path);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
     cb_return_defer(0);
   }
   cb_return_defer(1);
@@ -693,36 +702,36 @@ CB_b32 os_rename(Str old_path, Str new_path, Write_Buffer *stderr)
   return result;
 }
 
-CB_b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, Write_Buffer *stderr)
+CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr)
 {
-  Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
-  char *c_output_path = str_to_cstr(scratch.arena, output_path);
+  char *c_output_path = cb_str_to_cstr(scratch.arena, output_path);
 
   struct stat statbuf = {0};
   if (stat(c_output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
     if (errno == ENOENT) { cb_return_defer(1); }
-    log_begin(stderr, LOG_ERROR, S("Could not stat "));
-      append_str(stderr, output_path);
-      append_lit(stderr, ": ");
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
+      cb_append_str(stderr, output_path);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
     cb_return_defer(-1);
   }
   CB_i64 output_path_time = statbuf.st_mtime;
 
   for (CB_size i = 0; i < input_paths_len; ++i) {
-    Str input_path = input_paths[i];
-    char *c_input_path = str_to_cstr(scratch.arena, input_path);
+    CB_Str input_path = input_paths[i];
+    char *c_input_path = cb_str_to_cstr(scratch.arena, input_path);
     if (stat(c_input_path, &statbuf) < 0) {
       // NOTE: non-existing input is an error cause it is needed for building in the first place
-      log_begin(stderr, LOG_ERROR, S("Could not stat "));
-        append_str(stderr, input_path);
-        append_lit(stderr, ": ");
-        append_str(stderr, str_from_cstr(strerror(errno)));
-      log_end(stderr, S(""));
+      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
+        cb_append_str(stderr, input_path);
+        cb_append_lit(stderr, ": ");
+        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+      cb_log_end(stderr, S(""));
       cb_return_defer(-1);
     }
     CB_i64 input_path_time = statbuf.st_mtime;
@@ -735,39 +744,39 @@ CB_b32 os_needs_rebuild(Str output_path, Str *input_paths, int input_paths_len, 
   return result;
 }
 
-int os_run_cmd_async(Command command, Write_Buffer *stderr)
+int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
 {
   CB_assert(command.len >= 1);
 
-  log_begin(stderr, LOG_INFO, S("CMD: "));
-    cmd_render(command, stderr);
-  log_end(stderr, (Str){0});
+  cb_log_begin(stderr, CB_LOG_INFO, S("CMD: "));
+    cb_cmd_render(command, stderr);
+  cb_log_end(stderr, (CB_Str){0});
 
   pid_t cpid = fork();
   if (cpid < 0) {
-    log_begin(stderr, LOG_ERROR, S("Could not fork child process: "));
-      append_str(stderr, str_from_cstr(strerror(errno)));
-    log_end(stderr, (Str){0});
-    return OS_INVALID_PROC;
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not fork child process: "));
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
+    return CB_INVALID_PROC;
   }
 
   if (cpid == 0) {
-    Arena_Mark scratch = arena_get_scratch(0, 0); // REVIEW: not sure what happens here, we never pop the mark
+    CB_Arena_Mark scratch = arena_get_scratch(0, 0); // REVIEW: not sure what happens here, we never pop the mark
     char *cmd_null[512];
     { // Fill cmd
       CB_size i = 0;
       for (i = 0; i < command.len; i++) {
-        cmd_null[i] = str_to_cstr(scratch.arena, command.items[i]);
+        cmd_null[i] = cb_str_to_cstr(scratch.arena, command.items[i]);
       }
       CB_assert(i < 512);
       cmd_null[i] = 0;
     }
 
     if (execvp(cmd_null[0], cmd_null) < 0) {
-      log_begin(stderr, LOG_ERROR, S("Could not exec child process: "));
-        append_str(stderr, str_from_cstr(strerror(errno)));
-      log_end(stderr, (Str){0});
-      os_exit(1);
+      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not exec child process: "));
+        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+      cb_log_end(stderr, (CB_Str){0});
+      cb_exit(1);
     }
     CB_assert(0 && "unreachable");
   }
@@ -775,36 +784,36 @@ int os_run_cmd_async(Command command, Write_Buffer *stderr)
   return cpid;
 }
 
-CB_b32 os_run_cmd_sync(Command command, Write_Buffer *stderr)
+CB_b32 cb_cmd_run_sync(CB_Command command, CB_Write_Buffer *stderr)
 {
-  OS_Proc proc = os_run_cmd_async(command, stderr);
-  if (!os_proc_wait(proc, stderr)) {
+  CB_Proc proc = cb_cmd_run_async(command, stderr);
+  if (!cb_proc_wait(proc, stderr)) {
     return 0;
   }
   return 1;
 }
 
-CB_b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
+CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr)
 {
-  if (proc == OS_INVALID_PROC) return 0;
+  if (proc == CB_INVALID_PROC) return 0;
 
   for (;;) {
     int wstatus = 0;
     if (waitpid(proc, &wstatus, 0) < 0) {
-      log_begin(stderr, LOG_ERROR, S("Could not wait on child process (pid "));
-        append_long(stderr, (long)proc);
-        append_lit(stderr, "): ");
-        append_str(stderr, str_from_cstr(strerror(errno)));
-      log_end(stderr, (Str){0});
+      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not wait on child process (pid "));
+        cb_append_long(stderr, (long)proc);
+        cb_append_lit(stderr, "): ");
+        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+      cb_log_end(stderr, (CB_Str){0});
       return 0;
     }
 
     if (WIFEXITED(wstatus)) {
       int exit_status = WEXITSTATUS(wstatus);
       if (exit_status != 0) {
-        log_begin(stderr, LOG_ERROR, S("Child process exited with exit code "));
-          append_long(stderr, (long)exit_status);
-        log_end(stderr, (Str){0});
+        cb_log_begin(stderr, CB_LOG_ERROR, S("Child process exited with exit code "));
+          cb_append_long(stderr, (long)exit_status);
+        cb_log_end(stderr, (CB_Str){0});
         return 0;
       }
 
@@ -812,9 +821,9 @@ CB_b32 os_proc_wait(OS_Proc proc, Write_Buffer *stderr)
     }
 
     if (WIFSIGNALED(wstatus)) {
-      log_begin(stderr, LOG_ERROR, S("Child process was terminated by "));
-        append_str(stderr, str_from_cstr(strsignal(WTERMSIG(wstatus))));
-      log_end(stderr, (Str){0});
+      cb_log_begin(stderr, CB_LOG_ERROR, S("Child process was terminated by "));
+        cb_append_str(stderr, cb_str_from_cstr(strsignal(WTERMSIG(wstatus))));
+      cb_log_end(stderr, (CB_Str){0});
       return 0;
     }
   }
