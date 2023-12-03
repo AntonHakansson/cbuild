@@ -559,19 +559,23 @@ void os_mfree(u8 *memory_to_free)
 i32  os_open(Str filepath, Write_Buffer *stderr)
 {
   Arena_Mark scratch = arena_get_scratch(0, 0);
+  i32 result = 0;
+
   char *c_filepath = str_to_cstr(scratch.arena, filepath);
-  i32 fd = open(c_filepath, O_RDWR | O_CREAT, 0755);
+  i32 fd = open(c_filepath, O_RDWR | O_CREAT | O_TRUNC, 0755);
   if (fd < 0) {
     log_begin(stderr, LOG_ERROR, S("Could not open file "));
       append_str(stderr, filepath);
       append_lit(stderr, ": ");
       append_str(stderr, str_from_cstr(strerror(errno)));
     log_end(stderr, (Str){0});
-    fd = 0;
+    return_defer(0);
   }
+  return_defer(fd);
 
+ defer:
   arena_pop_mark(scratch);
-  return fd;
+  return result;
 }
 
 b32 os_close(i32 fd, Write_Buffer *stderr)
