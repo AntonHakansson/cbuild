@@ -5,7 +5,7 @@
 
 int main(int argc, char **argv)
 {
-  CB_Arena *perm = alloc_arena(8 * 1024 * 1024); // permanent arena
+  CB_Arena *perm = cb_alloc_arena(8 * 1024 * 1024); // permanent arena
   // REVIEW: Move this to global cbuild context.
   CB_Write_Buffer *stderr = cb_fd_buffer(2, perm, 4 * 1024);
 
@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     // Configure program i.e. write default build/config.h for current platform.
     // if file build/config.h does not exist -> construct it and recompile cbuild.
 
-    CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+    CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
 
     CB_i32 conf_fd = cb_open(S("build/config.h"), stderr);
     if (!conf_fd) { cb_exit(1); }
@@ -63,7 +63,7 @@ int main(int argc, char **argv)
     cb_log_emit(stderr, CB_LOG_INFO, S("Wrote build/config.h"));
     cb_close(conf_fd, stderr);
 
-    arena_pop_mark(scratch);
+    cb_arena_pop_mark(scratch);
   }
 
   { // Build program
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
   }
 
   cb_flush(stderr);
-  free_arena(perm);
-  free_scratch_pool();
+  cb_free_arena(perm);
+  cb_free_scratch_pool();
   return 0;
 }

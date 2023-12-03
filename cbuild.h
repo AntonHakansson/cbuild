@@ -40,7 +40,7 @@ typedef CB_i32   CB_b32;
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
 
-#define new(a, t, n) (t *) arena_alloc(a, CB_sizeof(t), CB_alignof(t), (n))
+#define new(a, t, n) (t *) cb_arena_alloc(a, CB_sizeof(t), CB_alignof(t), (n))
 
 typedef struct {
   CB_u8 *backing;
@@ -116,7 +116,7 @@ void    cb_append_long(CB_Write_Buffer *b, long x);
       t s = {0};                                                        \
       s.capacity = cap;                                                 \
       s.items = (typeof(s.items))                                       \
-        arena_alloc((a),                                                \
+        cb_arena_alloc((a),                                             \
                     CB_sizeof(s.items[0]),                              \
                     CB_alignof(typeof(s.items[0])),                     \
                     s.capacity);                                        \
@@ -248,7 +248,7 @@ char *cb_str_to_cstr(CB_Arena *a, CB_Str s)
 #  define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif
 
-CB_Arena arena_init(CB_u8 *backing, CB_size capacity)
+CB_Arena cb_arena_init(CB_u8 *backing, CB_size capacity)
 {
   CB_assert(backing);
   CB_assert(capacity > 0);
@@ -260,7 +260,7 @@ CB_Arena arena_init(CB_u8 *backing, CB_size capacity)
 }
 
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
-CB_u8 *arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count)
+CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count)
 {
   CB_assert(a->at >= a->backing);
   CB_size avail = (a->backing + a->capacity) - a->at;
@@ -283,17 +283,17 @@ CB_u8 *arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count)
   return p;
 }
 
-CB_Arena *alloc_arena(CB_size capacity)
+CB_Arena *cb_alloc_arena(CB_size capacity)
 {
   CB_Arena *result = 0;
   CB_u8 *mem = cb_malloc(capacity);
-  CB_Arena temp = arena_init(mem, capacity);
+  CB_Arena temp = cb_arena_init(mem, capacity);
   result = new(&temp, CB_Arena, 1);
   *result = temp;
   return result;
 }
 
-void free_arena(CB_Arena *arena)
+void cb_free_arena(CB_Arena *arena)
 {
   CB_u8 *to_free = arena->backing;
   // TODO: memset here
@@ -302,7 +302,7 @@ void free_arena(CB_Arena *arena)
   cb_mfree(to_free);
 }
 
-CB_Arena_Mark arena_push_mark(CB_Arena *a)
+CB_Arena_Mark cb_arena_push_mark(CB_Arena *a)
 {
   CB_Arena_Mark result = {0};
   result.arena = a;
@@ -310,7 +310,7 @@ CB_Arena_Mark arena_push_mark(CB_Arena *a)
   return result;
 }
 
-void arena_pop_mark(CB_Arena_Mark a)
+void cb_arena_pop_mark(CB_Arena_Mark a)
 {
   CB_assert(a.arena->at > a.marker);
   CB_size len = a.arena->at - a.marker;
@@ -321,7 +321,7 @@ void arena_pop_mark(CB_Arena_Mark a)
 
 static __thread CB_Arena *g_thread_scratch_pool[SCRATCH_ARENA_COUNT] = {0, 0};
 
-static CB_Arena *arena_get_scratch_(CB_Arena **conflicts, CB_size conflicts_len)
+static CB_Arena *cb_arena_get_scratch_(CB_Arena **conflicts, CB_size conflicts_len)
 {
   CB_assert(conflicts_len < SCRATCH_ARENA_COUNT);
 
@@ -329,7 +329,7 @@ static CB_Arena *arena_get_scratch_(CB_Arena **conflicts, CB_size conflicts_len)
 
   if (scratch_pool[0] == 0) {
     for (CB_size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
-      scratch_pool[i] = alloc_arena(SCRATCH_ARENA_CAPACITY);
+      scratch_pool[i] = cb_alloc_arena(SCRATCH_ARENA_CAPACITY);
     }
     return scratch_pool[0];
   }
@@ -352,17 +352,17 @@ static CB_Arena *arena_get_scratch_(CB_Arena **conflicts, CB_size conflicts_len)
   return 0;
 }
 
-CB_Arena_Mark arena_get_scratch(CB_Arena **conflicts, CB_size conflicts_len)
+CB_Arena_Mark cb_arena_get_scratch(CB_Arena **conflicts, CB_size conflicts_len)
 {
-  CB_Arena *a = arena_get_scratch_(conflicts, conflicts_len);
+  CB_Arena *a = cb_arena_get_scratch_(conflicts, conflicts_len);
   CB_Arena_Mark result = {0};
   if (a) {
-   result = arena_push_mark(a);
+   result = cb_arena_push_mark(a);
   }
   return result;
 }
 
-void free_scratch_pool()
+void cb_free_scratch_pool()
 {
   for (CB_size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
     CB_Arena *a = g_thread_scratch_pool[i];
@@ -459,12 +459,12 @@ void cb_da_grow(CB_Arena *arena, void **__restrict items, CB_size *__restrict ca
   CB_u8 *items_end = (((CB_u8*)(*items)) + (item_size * (*len)));
   if (arena->at == items_end) {
     // Extend in place, no allocation occured between da_grow calls
-    arena_alloc(arena, item_size, align, (*capacity));
+    cb_arena_alloc(arena, item_size, align, (*capacity));
     *capacity *= 2;
   }
   else {
     // Relocate array
-    CB_u8 *p = arena_alloc(arena, item_size, align, (*capacity) * 2);
+    CB_u8 *p = cb_arena_alloc(arena, item_size, align, (*capacity) * 2);
     // TODO(hk): memcpy
 #define DA_MEMORY_COPY(dst, src, bytes) do { for (int i = 0; i < bytes; i++) { ((char *)dst)[i] = ((char *)src)[i]; } } while(0)
     DA_MEMORY_COPY(p, *items, (*len) * item_size);
@@ -514,19 +514,22 @@ void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt)
 ////////////////////////////////////////////////////////////////////////////////
 //- Command Implementation
 
-void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg) {
+void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg)
+{
   *(cb_push(arena, cmd)) = arg;
 }
 
 void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
-                      CB_size lits_len) {
+                         CB_size lits_len)
+{
   for (CB_size i = 0; i < lits_len; i++) {
     CB_Str str = cb_str_from_cstr((char *)lits[i]);
     *(cb_push(arena, cmd)) = str;
   }
 }
 
-CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf) {
+CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf)
+{
   CB_Str result = {0};
   result.len = buf->len;
   result.buf = buf->buf + buf->len;
@@ -577,7 +580,7 @@ void cb_mfree(CB_u8 *memory_to_free)
 
 CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr)
 {
-  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_i32 result = 0;
 
   char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
@@ -593,7 +596,7 @@ CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr)
   cb_return_defer(fd);
 
  defer:
-  arena_pop_mark(scratch);
+  cb_arena_pop_mark(scratch);
   return result;
 }
 
@@ -613,7 +616,7 @@ CB_b32 cb_close(CB_i32 fd, CB_Write_Buffer *stderr)
 
 CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr)
 {
-  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
   char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
@@ -630,7 +633,7 @@ CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr)
   cb_return_defer(1);
 
  defer:
-  arena_pop_mark(scratch);
+  cb_arena_pop_mark(scratch);
   return result;
 }
 
@@ -652,7 +655,7 @@ void cb_exit(int status)
 
 CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr)
 {
-  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
   char *c_directory = cb_str_to_cstr(scratch.arena, directory);
@@ -674,13 +677,13 @@ CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr)
   cb_log_end(stderr, S("\""));
 
  defer:
-  arena_pop_mark(scratch);
+  cb_arena_pop_mark(scratch);
   return result;
 }
 
 CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr)
 {
-  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
   char *c_old_path = cb_str_to_cstr(scratch.arena, old_path);
@@ -698,13 +701,13 @@ CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr)
   cb_return_defer(1);
 
  defer:
-  arena_pop_mark(scratch);
+  cb_arena_pop_mark(scratch);
   return result;
 }
 
 CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr)
 {
-  CB_Arena_Mark scratch = arena_get_scratch(0, 0);
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
   char *c_output_path = cb_str_to_cstr(scratch.arena, output_path);
@@ -740,7 +743,7 @@ CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths
   }
 
  defer:
-  arena_pop_mark(scratch);
+  cb_arena_pop_mark(scratch);
   return result;
 }
 
@@ -761,7 +764,7 @@ int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
   }
 
   if (cpid == 0) {
-    CB_Arena_Mark scratch = arena_get_scratch(0, 0); // REVIEW: not sure what happens here, we never pop the mark
+    CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0); // REVIEW: not sure what happens here, we never pop the mark
     char *cmd_null[512];
     { // Fill cmd
       CB_size i = 0;
