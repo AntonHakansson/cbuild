@@ -4,6 +4,9 @@
 #if !defined(CB_DEFAULT_BASIC_TYPES)
 #  define CB_DEFAULT_BASIC_TYPES 1
 #endif
+#if !defined(CB_DEFAULT_MEMORY)
+#  define CB_DEFAULT_MEMORY 1
+#endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -28,13 +31,25 @@ typedef __SIZE_TYPE__    CB_usize;
 
 typedef CB_i32   CB_b32;
 
+#if defined(CB_DEFAULT_MEMORY)
+#include <stdlib.h>
+#include <string.h>
+#define CB_malloc(n) malloc(n)
+#define CB_free(p) free(p)
+#define CB_memset(s, c, n) memset((s), (c), (n))
+#define CB_memcpy(d, s, n) memcpy((d), (s), (n))
+#endif
+
 // Use signed values everywhere
 #define CB_sizeof(s)  (CB_size)sizeof(s)
 #define CB_countof(s) (CB_sizeof(s) / CB_sizeof(*(s)))
  // REVIEW: @portability
-#define CB_alignof(s) (CB_size)_Alignof(s)
-#define CB_assert(c)  while((!(c))) __builtin_unreachable()
-
+#ifndef CB_assert
+#  define CB_alignof(s) (CB_size)_Alignof(s)
+#endif
+#ifndef CB_assert
+#  define CB_assert(c)  while((!(c))) __builtin_unreachable()
+#endif
 #define cb_return_defer(r)  do { result = (r); goto defer; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -83,8 +98,8 @@ typedef struct {
 } CB_Str;
 
 CB_Str cb_str_from_cstr(char *str);
-CB_b32 cb_str_equals(CB_Str a, CB_Str b);
 char *cb_str_to_cstr(CB_Arena *a, CB_Str s);
+CB_b32 cb_str_equals(CB_Str a, CB_Str b);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,7 +155,9 @@ void    cb_append_long(CB_Write_Buffer *b, long x);
       (s)->items + (s)->len++;                     \
     })
 
-void cb_da_grow(CB_Arena *arena, void **items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align);
+void cb_da_grow(CB_Arena *arena, void **items,
+                CB_size *__restrict capacity, CB_size *__restrict len,
+                CB_size item_size, CB_size align);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,27 +185,32 @@ typedef struct CB_Command {
   CB_size len;
 } CB_Command;
 
-CB_Str  cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
+CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
 void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg);
 void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
-                      CB_size lits_len);
-#define cb_cmd_append_lits(arena, cmd, ...) \
-  cb_cmd_append_lits_(arena, cmd, ((const char*[]){__VA_ARGS__}), (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
+                         CB_size lits_len);
+#define cb_cmd_append_lits(arena, cmd, ...)                             \
+  cb_cmd_append_lits_(arena, cmd,                                       \
+                      ((const char*[]){__VA_ARGS__}),                   \
+                      (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Platform
 
-CB_u8  *cb_malloc(CB_size amount);
+CB_u8 *cb_malloc(CB_size amount);
 void cb_mfree(CB_u8 *memory_to_free);
-__attribute__((noreturn)) void cb_exit (CB_i32 status);
-CB_b32  cb_write(CB_i32 fd, CB_u8 *buf, CB_size len);
-CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr);
-CB_b32  cb_close(CB_i32 fd, CB_Write_Buffer *stderr);
-CB_b32  cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr);
-CB_b32  cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr);
-CB_b32  cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr);
-CB_b32  cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr);
+__attribute__((noreturn))
+void cb_exit (CB_i32 status);
+CB_b32 cb_write(CB_i32 fd, CB_u8 *buf, CB_size len);
+// REVIEW: Maybe introduce or replace open/close with read_entire_file and write_entire_file
+CB_i32 cb_open(CB_Str filepath, CB_Write_Buffer *stderr);
+CB_b32 cb_close(CB_i32 fd, CB_Write_Buffer *stderr);
+CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr);
+CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr);
+CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr);
+CB_b32 cb_needs_rebuild(CB_Str output_path,
+                        CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr);
 
 #define CB_INVALID_PROC (-1)
 typedef int CB_Proc;
@@ -218,21 +240,21 @@ CB_Str cb_str_from_cstr(char *str)
   return result;
 }
 
-CB_b32 str_equals(CB_Str a, CB_Str b)
-{
-  if (a.len != b.len) { return 0; }
-  for (CB_size i = 0; i < a.len; i++) {
-    if (a.buf[i] != b.buf[i]) { return 0; }
-  }
-  return 1;
-}
-
 char *cb_str_to_cstr(CB_Arena *a, CB_Str s)
 {
   CB_Write_Buffer *b = cb_mem_buffer(a, s.len + 1);
   cb_append_str(b, s);
   cb_append_byte(b, '\0');
   return (char *)b->buf;
+}
+
+CB_b32 cb_str_equals(CB_Str a, CB_Str b)
+{
+  if (a.len != b.len) { return 0; }
+  for (CB_size i = 0; i < a.len; i++) {
+    if (a.buf[i] != b.buf[i]) { return 0; }
+  }
+  return 1;
 }
 
 
@@ -275,10 +297,7 @@ CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count
   a->at += total;
   ASAN_UNPOISON_MEMORY_REGION(p, (CB_usize)(objsize * count));
 
-  // TODO: memcpy
-  for (CB_size i = 0; i < objsize * count; i++) {
-    p[i] = 0;
-  }
+  CB_memset(p, 0, (CB_usize)(objsize * count));
 
   return p;
 }
@@ -296,9 +315,7 @@ CB_Arena *cb_alloc_arena(CB_size capacity)
 void cb_free_arena(CB_Arena *arena)
 {
   CB_u8 *to_free = arena->backing;
-  // TODO: memset here
-  { arena->backing = arena->at = 0;
-    arena->capacity = 0; }
+  CB_memset(arena, 0, sizeof(*arena));
   cb_mfree(to_free);
 }
 
@@ -453,7 +470,9 @@ void cb_flush(CB_Write_Buffer *b)
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array Implemntation
 
-void cb_da_grow(CB_Arena *arena, void **__restrict items, CB_size *__restrict capacity, CB_size *__restrict len, CB_size item_size, CB_size align)
+void cb_da_grow(CB_Arena *arena, void ** items,
+                CB_size *__restrict capacity, CB_size *__restrict len,
+                CB_size item_size, CB_size align)
 {
   CB_assert(*items != 0 && *capacity > 0);
   CB_u8 *items_end = (((CB_u8*)(*items)) + (item_size * (*len)));
@@ -465,10 +484,7 @@ void cb_da_grow(CB_Arena *arena, void **__restrict items, CB_size *__restrict ca
   else {
     // Relocate array
     CB_u8 *p = cb_arena_alloc(arena, item_size, align, (*capacity) * 2);
-    // TODO(hk): memcpy
-#define DA_MEMORY_COPY(dst, src, bytes) do { for (int i = 0; i < bytes; i++) { ((char *)dst)[i] = ((char *)src)[i]; } } while(0)
-    DA_MEMORY_COPY(p, *items, (*len) * item_size);
-#undef DA_MEMORY_COPY
+    CB_memcpy(p, *items, (CB_usize)((*len) * item_size));
     *items = (void *)p;
     *capacity *= 2;
   }

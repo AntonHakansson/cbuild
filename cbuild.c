@@ -5,7 +5,8 @@
 
 int main(int argc, char **argv)
 {
-  CB_Arena *perm = cb_alloc_arena(8 * 1024 * 1024); // permanent arena
+  // Permanent arena - lifetime of whole program
+  CB_Arena *perm = cb_alloc_arena(8 * 1024 * 1024);
   // REVIEW: Move this to global cbuild context.
   CB_Write_Buffer *stderr = cb_fd_buffer(2, perm, 4 * 1024);
 
