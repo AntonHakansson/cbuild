@@ -767,6 +767,59 @@ CB_b32 cb_write_entire_file(CB_Str filepath, CB_Str content, CB_Write_Buffer *st
   return result;
 }
 
+typedef struct {
+  CB_i32 status;
+  CB_Str file_contents;
+} CB_Read_Result;
+
+CB_Read_Result cb_read_entire_file(CB_Arena *arena, CB_Str filepath, CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(&arena, 1);
+  CB_Read_Result result = {0};
+
+  char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
+  FILE* file = fopen(c_filepath, "r");
+  if (file == 0) {
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
+      cb_append_str(stderr, filepath);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
+    cb_return_defer(result);
+  }
+
+  if (fseek(file, 0, SEEK_END) < 0) {
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not seek file "));
+      cb_append_str(stderr, filepath);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
+    cb_return_defer(result);
+  }
+
+  // Reserve some memory
+  CB_size ifile_size = ftell(file);
+  CB_assert(ifile_size >= 0);
+  CB_usize file_size = (CB_usize)ifile_size;
+  CB_u8 *data = new(arena, CB_u8, ifile_size + 1);
+
+  // Read contents
+  rewind(file);
+  CB_usize n = fread(data, 1, file_size, file);
+  CB_assert(n == file_size);
+  data[file_size] = 0;
+  fclose(file);
+
+  result.status = 1;
+  result.file_contents = (CB_Str){ .buf = data, .len = ifile_size, };
+  cb_return_defer(result);
+
+  CB_assert(0 && "unreachable");
+ defer:
+  cb_arena_pop_mark(scratch);
+  return result;
+}
+
 CB_b32 cb_write(CB_i32 fd, CB_u8 *buf, CB_size len)
 {
   for (CB_size off = 0; off < len;) {
@@ -906,7 +959,12 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
     if (!cb_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { cb_exit(1); }
 
     // Re-run yourself
-    execv(argv[0], argv);
+    cb_log_begin(stderr, CB_LOG_INFO, S("CMD: "));
+      cb_append_str(stderr, cb_str_from_cstr(argv[0]));
+    cb_log_end(stderr, (CB_Str){0});
+    char *argv_empty[] = { argv[0], 0 };
+    execv(argv_empty[0], argv_empty);
+
     CB_assert(0 && "unreachable");
   }
 
