@@ -3,6 +3,10 @@
 #define CBUILD_IMPLEMENTATION
 #include "cbuild.h"
 
+#ifdef CBUILD_CONFIGURED
+#include "build/config.h"
+#endif
+
 CB_b32 build_sokol_library(CB_b32 debug, CB_Write_Buffer *stderr)
 {
   CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
@@ -20,7 +24,7 @@ CB_b32 build_sokol_library(CB_b32 debug, CB_Write_Buffer *stderr)
   int status = cb_needs_rebuild(S("build/libsokol.a"), sokol_sources, CB_countof(sokol_sources), stderr);
   if (status < 0) { cb_return_defer(0); }
   else if (status > 0) {
-    cb_log_emit(stderr, CB_LOG_INFO, S("Building Sokol Library"));
+    cb_log_emit(stderr, CB_LOG_INFO, S("Building Sokol Library ..."));
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
     cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", "build/libsokol.a", "-c", "src/sokol.c");
     cb_cmd_append_lits(scratch.arena, &cmd, "-I./vendor/sokol/");
@@ -44,21 +48,23 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   CB_b32 result = 0;
 
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
-  CB_Str source = {0};
-  source.buf = b->buf + b->len;
+
+  CB_Str_Mark mark = cb_write_buffer_mark(b);
   cb_append_lit(b, "./src/");
   cb_append_str(b, program);
   cb_append_lit(b, ".c");
-  source.len = (b->buf + b->len) - source.buf;
+  CB_Str source = cb_str_from_mark(&mark);
 
-  CB_Str shader = {0};
-  shader.buf = b->buf + b->len;
   cb_append_lit(b, "./src/");
   cb_append_str(b, program);
   cb_append_lit(b, ".glsl");
-  shader.len = (b->buf + b->len) - shader.buf;
+  CB_Str shader = cb_str_from_mark(&mark);
+
+  cb_append_lit(b, "./src/");
+  cb_append_str(b, program);
+  cb_append_lit(b, ".glsl");
   cb_append_lit(b, ".h");
-  CB_Str shader_h = (CB_Str){.buf = shader.buf, .len = shader.len + 2, };
+  CB_Str shader_h =  cb_str_from_mark(&mark);
 
   int status_shader = cb_needs_rebuild(shader_h, &shader, 1, stderr);
   if (status_shader < 0) { cb_return_defer(0); }
@@ -74,11 +80,10 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
   }
 
-  CB_Str exe = {0};
-  exe.buf = b->buf + b->len;
+  mark = cb_write_buffer_mark(b);
   cb_append_lit(b, "build/");
   cb_append_str(b, program);
-  exe.len = (b->buf + b->len) - exe.buf;
+  CB_Str exe = cb_str_from_mark(&mark);
 
   CB_Str sapp_sources[] = { source, shader };
   int status = cb_needs_rebuild(exe, sapp_sources, CB_countof(sapp_sources), stderr);
@@ -107,58 +112,27 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   return result;
 }
 
-void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_Write_Buffer *stderr)
-{
-  (void)argc;
-  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
-  if (!cb_mkdir_if_not_exists(S("build"), stderr)) cb_exit(1);
-
-  int status = cb_needs_rebuild(S("cbuild"), sources.items, sources.len, stderr);
-  if (status < 0) { cb_exit(1); }
-  else if (status > 0) {
-    cb_log_emit(stderr, CB_LOG_INFO, S("Rebuilding cbuild ..."));
-
-    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 128);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-g3");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=address");
-
-    if (!cb_cmd_run_sync(cmd, stderr)) { cb_exit(1); }
-
-    // Swap new and old
-    if (!cb_rename(S("cbuild"), S("build/cbuild.old"), stderr)) { cb_exit(1); }
-    if (!cb_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { cb_exit(1); }
-
-    // Re-run yourself
-    execv(argv[0], argv);
-    CB_assert(0 && "unreachable");
-  }
-
-  cb_arena_pop_mark(scratch);
-}
-
 int main(int argc, char **argv)
 {
-  // Permanent arena - lifetime of whole program
   CB_Arena *perm = cb_alloc_arena(8 * 1024 * 1024);
   CB_Write_Buffer *stderr = cb_fd_buffer(2, perm, 4 * 1024);
   CB_Str_List cbuild_sources = cb_str_dup_list(perm, "cbuild.c", "cbuild.h");
-  cb_rebuild_yourself(argc, argv, cbuild_sources, stderr);
 
+  // Configure program i.e. write default build/config.h if it does not exist.
   CB_b32 user_requested_to_reconfigure = (argc > 1);
   if (!cb_file_exists(S("build/config.h"), stderr) || user_requested_to_reconfigure) {
     cb_log_emit(stderr, CB_LOG_INFO, S("Reconfiguring cbuild ..."));
-
-    // Configure program i.e. write default build/config.h for current platform.
-    // if file build/config.h does not exist -> construct it and recompile cbuild.
+    if (!cb_mkdir_if_not_exists(S("build"), stderr)) cb_exit(1);
 
     CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
-
     CB_Write_Buffer *conf = cb_mem_buffer(scratch.arena, 8 * 1024);
-    cb_append_lit(conf, "#define TARGET_LINUX\n");
 
+#if __LINUX__
+    cb_append_lit(conf, "// Target platform to build for:\n");
+    cb_append_lit(conf, "#define TARGET_LINUX\n");
+#endif
+
+    cb_append_lit(conf, "// Git commit:\n");
 #if 0
     CB_Command git = cb_da_init(scratch.arena, CB_Command, 32);
     cb_cmd_append_lits(scratch.arena, &git, "git", "rev-parse", "--short", "HEAD");
@@ -170,18 +144,35 @@ int main(int argc, char **argv)
       cb_append_str(conf, git_commit);
     cb_append_lit(conf, "\"\n");
 
+    cb_append_lit(conf, "// Compile Sokol Triangle Example\n");
+    cb_append_lit(conf, "#define BUILD_SOKOL_EXAMPLE 1\n");
+
     CB_Str content = (CB_Str){.buf = conf->buf, .len = conf->len, };
     if (!cb_write_entire_file(S("build/config.h"), content, stderr)) cb_exit(1);
-
+    cb_log_emit(stderr, CB_LOG_INFO, S("Wrote build/config.h"));
     cb_arena_pop_mark(scratch);
+
+    cb_rebuild_yourself(argc, argv, cbuild_sources, 1, stderr);
   }
+
+  cb_rebuild_yourself(argc, argv, cbuild_sources, 0, stderr);
+
+#ifdef CBUILD_CONFIGURED
+
+  cb_log_emit(stderr, CB_LOG_INFO, S("Config:"));
+#if BUILD_SOKOL_EXAMPLE
+  cb_log_emit(stderr, CB_LOG_INFO, S("  #define SOKOL_EXAMPLE 1"));
+#endif
 
   { // Builder program
+    cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
+#ifdef BUILD_SOKOL_EXAMPLE
     CB_b32 debug = 1;
-
     if (!build_sokol_library(debug, stderr)) cb_exit(1);
     if (!build_sokol_example(S("triangle-sapp"), stderr)) cb_exit(1);
+#endif
   }
+#endif
 
   cb_flush(stderr);
   cb_free_arena(perm);

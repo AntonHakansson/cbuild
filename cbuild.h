@@ -146,6 +146,13 @@ void    cb_append_str(CB_Write_Buffer *b, CB_Str s);
 void    cb_append_byte(CB_Write_Buffer *b, unsigned char c);
 void    cb_append_long(CB_Write_Buffer *b, long x);
 
+typedef struct {
+  CB_Write_Buffer *b;
+  CB_u8 *at;
+} CB_Str_Mark;
+
+CB_Str_Mark cb_write_buffer_mark(CB_Write_Buffer *b);
+CB_Str cb_str_from_mark(CB_Str_Mark *mark);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array
@@ -238,6 +245,7 @@ CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr);
 CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr);
 CB_b32 cb_needs_rebuild(CB_Str output_path,
                         CB_Str *input_paths, CB_size input_paths_len, CB_Write_Buffer *stderr);
+void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 force_rebuild, CB_Write_Buffer *stderr);
 
 #define CB_INVALID_PROC (-1)
 typedef int CB_Proc;
@@ -298,7 +306,7 @@ CB_Str cb_str_chop_right(CB_Str str, unsigned char delim)
   CB_Str result = {0};
 
   while (str.len) {
-    char c = str.buf[str.len - 1];
+    CB_u8 c = str.buf[str.len - 1];
     if (c == delim) {
       result.buf = str.buf;
       result.len = str.len - 1;
@@ -528,6 +536,23 @@ void cb_flush(CB_Write_Buffer *b)
   }
 }
 
+CB_Str_Mark cb_write_buffer_mark(CB_Write_Buffer *b)
+{
+  CB_Str_Mark result = {0};
+  result.b = b;
+  result.at = b->buf + b->len;
+  return result;
+}
+
+CB_Str cb_str_from_mark(CB_Str_Mark *mark)
+{
+  CB_Str result = {0};
+  result.buf = mark->at;
+  result.len = (mark->b->buf + mark->b->len) - mark->at;
+  CB_assert(result.len > 0 && "We expact at least one character here.");
+  mark->at = result.buf + result.len;
+  return result;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array Implemntation
@@ -609,15 +634,15 @@ void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
 CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf)
 {
   CB_Str result = {0};
-  result.len = buf->len;
-  result.buf = buf->buf + buf->len;
+
+  CB_Str_Mark mark = cb_write_buffer_mark(buf);
   for (CB_size i = 0; i < cmd.len; i++) {
     if (i > 0) {
       cb_append_byte(buf, ' ');
     }
     cb_append_str(buf, cmd.items[i]);
   }
-  result.len = buf->len - result.len;
+  result = cb_str_from_mark(&mark);
   return result;
 }
 
@@ -852,6 +877,42 @@ CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, CB_size input_p
   return result;
 }
 
+void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 force_rebuild, CB_Write_Buffer *stderr)
+{
+  (void)argc;
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  if (!cb_mkdir_if_not_exists(S("build"), stderr)) cb_exit(1);
+
+  int status = cb_needs_rebuild(S("cbuild"), sources.items, sources.len, stderr);
+#ifndef CBUILD_CONFIGURED
+  status = 1; // force rebuild
+#endif
+  if (status < 0) { cb_exit(1); }
+  else if (status > 0 || force_rebuild) {
+    cb_log_emit(stderr, CB_LOG_INFO, S("Rebuilding cbuild ..."));
+
+    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 128);
+    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-DCBUILD_CONFIGURED");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-g3");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=address");
+
+    if (!cb_cmd_run_sync(cmd, stderr)) { cb_exit(1); }
+
+    // Swap new and old
+    if (!cb_rename(S("cbuild"), S("build/cbuild.old"), stderr)) { cb_exit(1); }
+    if (!cb_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { cb_exit(1); }
+
+    // Re-run yourself
+    execv(argv[0], argv);
+    CB_assert(0 && "unreachable");
+  }
+
+  cb_arena_pop_mark(scratch);
+}
+
 int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
 {
   CB_assert(command.len >= 1);
@@ -938,7 +999,6 @@ CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr)
 
   return 1;
 }
-
 
 #endif // __LINUX__
 
