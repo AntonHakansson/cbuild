@@ -18,26 +18,29 @@
 
 #if defined(CB_DEFAULT_BASIC_TYPES)
 #include <stdint.h>
+#include <stddef.h>
 typedef uint8_t   CB_u8;
 typedef uint32_t  CB_u32;
 typedef int32_t   CB_i32;
 typedef int64_t   CB_i64;
 typedef uint64_t  CB_u64;
 typedef uintptr_t CB_uptr;
-// REVIEW: @portability
-typedef __PTRDIFF_TYPE__ CB_size;
-typedef __SIZE_TYPE__    CB_usize;
+typedef ptrdiff_t CB_size;
+typedef size_t    CB_usize;
 #endif // CB_DEFAULT_BASIC_TYPES
 
 typedef CB_i32   CB_b32;
 
 #if defined(CB_DEFAULT_MEMORY)
 #include <stdlib.h>
-#include <string.h>
 #define CB_malloc(n) malloc(n)
 #define CB_free(p) free(p)
-#define CB_memset(s, c, n) memset((s), (c), (n))
-#define CB_memcpy(d, s, n) memcpy((d), (s), (n))
+
+// REVIEW: @portability of builtins
+/* #define CB_memset(s, c, n) memset((s), (c), (n)) */
+#define CB_memset(s, c, n) __builtin_memset((s), (c), (n))
+// #define CB_memcpy(d, s, n) memcpy((d), (s), (n))
+#define CB_memcpy(d, s, n) __builtin_memcpy((d), (s), (n))
 #endif
 
 // Use signed values everywhere
@@ -54,7 +57,9 @@ typedef CB_i32   CB_b32;
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Arena Allocator
-
+//
+// Credit: @ryanjfluery, nullprogram(u/skeeto)
+//
 #define new(a, t, n) (t *) cb_arena_alloc(a, CB_sizeof(t), CB_alignof(t), (n))
 
 typedef struct {
@@ -82,7 +87,7 @@ void cb_arena_pop_mark(CB_Arena_Mark a);
 #define SCRATCH_ARENA_CAPACITY (8 * 1024 * 1024)
 
 CB_Arena_Mark cb_arena_scratch(CB_Arena **conflicts, CB_size conflicts_len);
-void cb_free_scratch_pool();
+void cb_free_scratch_pool(void);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -98,14 +103,32 @@ typedef struct {
 } CB_Str;
 
 CB_Str cb_str_from_cstr(char *str);
+CB_Str cb_str_dup_cstr(CB_Arena *a, char *str);
+CB_Str cb_to_str(char *str);
 char *cb_str_to_cstr(CB_Arena *a, CB_Str s);
 CB_b32 cb_str_equals(CB_Str a, CB_Str b);
 
+CB_Str cb_str_chop_right(CB_Str str, unsigned char delim);
+
+
+typedef struct {
+  CB_Str *items;
+  CB_size capacity;
+  CB_size len;
+} CB_Str_List;
+
+CB_Str_List cb_str_dup_list_(CB_Arena *arena, const char *cstrs[], CB_size len);
+#define cb_str_dup_list(arena, ...)                             \
+  cb_str_dup_list_(arena, ((const char*[]){__VA_ARGS__}),        \
+   (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Buffered IO
+//
+// Credit: nullprogram(u/skeeto)
+//
 
-typedef struct  {
+typedef struct {
   CB_u8 *buf;
   CB_size capacity;
   CB_size len;
@@ -126,6 +149,9 @@ void    cb_append_long(CB_Write_Buffer *b, long x);
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array
+//
+// Credit: nullprogram(u/skeeto)
+//
 
 #define cb_da_init(a, t, cap) ({                                        \
       t s = {0};                                                        \
@@ -203,14 +229,15 @@ void cb_mfree(CB_u8 *memory_to_free);
 __attribute__((noreturn))
 void cb_exit (CB_i32 status);
 CB_b32 cb_write(CB_i32 fd, CB_u8 *buf, CB_size len);
-// REVIEW: Maybe introduce or replace open/close with read_entire_file and write_entire_file
 CB_i32 cb_open(CB_Str filepath, CB_Write_Buffer *stderr);
 CB_b32 cb_close(CB_i32 fd, CB_Write_Buffer *stderr);
+
 CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr);
+CB_b32 cb_write_entire_file(CB_Str filepath, CB_Str content, CB_Write_Buffer *stderr);
 CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr);
 CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr);
 CB_b32 cb_needs_rebuild(CB_Str output_path,
-                        CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr);
+                        CB_Str *input_paths, CB_size input_paths_len, CB_Write_Buffer *stderr);
 
 #define CB_INVALID_PROC (-1)
 typedef int CB_Proc;
@@ -240,6 +267,14 @@ CB_Str cb_str_from_cstr(char *str)
   return result;
 }
 
+CB_Str cb_str_dup_cstr(CB_Arena *a, char *str)
+{
+  CB_Str s = cb_str_from_cstr(str);
+  CB_Write_Buffer *b = cb_mem_buffer(a, s.len);
+  cb_append_str(b, s);
+  return (CB_Str){ .buf = b->buf, .len = s.len, };
+}
+
 char *cb_str_to_cstr(CB_Arena *a, CB_Str s)
 {
   CB_Write_Buffer *b = cb_mem_buffer(a, s.len + 1);
@@ -255,6 +290,33 @@ CB_b32 cb_str_equals(CB_Str a, CB_Str b)
     if (a.buf[i] != b.buf[i]) { return 0; }
   }
   return 1;
+}
+
+CB_Str cb_str_chop_right(CB_Str str, unsigned char delim)
+{
+  CB_assert(str.len >= 0);
+  CB_Str result = {0};
+
+  while (str.len) {
+    char c = str.buf[str.len - 1];
+    if (c == delim) {
+      result.buf = str.buf;
+      result.len = str.len - 1;
+      break;
+    }
+    str.len--;
+  }
+
+  return result;
+}
+
+CB_Str_List cb_str_dup_list_(CB_Arena *arena, const char *cstrs[], CB_size len)
+{
+  CB_Str_List result = cb_da_init(arena, CB_Str_List, 32);
+  for (CB_size i = 0; i < len; i++) {
+    *(cb_push(arena, &result)) = cb_str_dup_cstr(arena, (char *)cstrs[i]);
+  }
+  return result;
 }
 
 
@@ -329,7 +391,7 @@ CB_Arena_Mark cb_arena_push_mark(CB_Arena *a)
 
 void cb_arena_pop_mark(CB_Arena_Mark a)
 {
-  CB_assert(a.arena->at > a.marker);
+  CB_assert(a.arena->at >= a.marker);
   CB_size len = a.arena->at - a.marker;
   CB_assert(len >= 0);
   ASAN_POISON_MEMORY_REGION(a.marker, (CB_usize)len);
@@ -379,7 +441,7 @@ CB_Arena_Mark cb_arena_get_scratch(CB_Arena **conflicts, CB_size conflicts_len)
   return result;
 }
 
-void cb_free_scratch_pool()
+void cb_free_scratch_pool(void)
 {
   for (CB_size i = 0; i < SCRATCH_ARENA_COUNT; i++) {
     CB_Arena *a = g_thread_scratch_pool[i];
@@ -653,6 +715,33 @@ CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr)
   return result;
 }
 
+CB_b32 cb_write_entire_file(CB_Str filepath, CB_Str content, CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  CB_i32 result = 0;
+
+  char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
+  CB_i32 fd = open(c_filepath, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+  if (fd < 0) {
+    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
+      cb_append_str(stderr, filepath);
+      cb_append_lit(stderr, ": ");
+      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr, (CB_Str){0});
+    cb_return_defer(0);
+  }
+
+  cb_write(fd, content.buf, content.len);
+  if (!cb_close(fd, stderr)) cb_return_defer(0);
+
+  cb_return_defer(1);
+
+  CB_assert(0 && "unreachable");
+ defer:
+  cb_arena_pop_mark(scratch);
+  return result;
+}
+
 CB_b32 cb_write(CB_i32 fd, CB_u8 *buf, CB_size len)
 {
   for (CB_size off = 0; off < len;) {
@@ -721,7 +810,7 @@ CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr)
   return result;
 }
 
-CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, int input_paths_len, CB_Write_Buffer *stderr)
+CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, CB_size input_paths_len, CB_Write_Buffer *stderr)
 {
   CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
