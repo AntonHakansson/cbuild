@@ -55,17 +55,17 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
 
   CB_Str_Mark mark = cb_write_buffer_mark(b);
-  cb_append_lit(b, "./src/");
+  cb_append_lit(b, "./src/sokol-examples/");
   cb_append_str(b, program);
   cb_append_lit(b, ".c");
   CB_Str source = cb_str_from_mark(&mark);
 
-  cb_append_lit(b, "./src/");
+  cb_append_lit(b, "./src/sokol-examples/");
   cb_append_str(b, program);
   cb_append_lit(b, ".glsl");
   CB_Str shader = cb_str_from_mark(&mark);
 
-  cb_append_lit(b, "./src/");
+  cb_append_lit(b, "./src/sokol-examples/");
   cb_append_str(b, program);
   cb_append_lit(b, ".glsl");
   cb_append_lit(b, ".h");
@@ -150,6 +150,7 @@ int main(int argc, char **argv)
     cb_append_lit(conf, "\"\n");
 
     cb_append_lit(conf, "#define BUILD_SOKOL_EXAMPLE 1\n");
+    cb_append_lit(conf, "// Enable to build sokol with debug information and disable optimizations.\n");
     cb_append_lit(conf, "// #define SOKOL_DEBUG 1\n");
 
     CB_Str content = (CB_Str){.buf = conf->buf, .len = conf->len, };

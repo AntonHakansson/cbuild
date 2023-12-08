@@ -64,6 +64,14 @@ void frame(void) {
     sg_commit();
 }
 
+void event(const sapp_event* e) {
+  if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {
+    if (e->key_code == SAPP_KEYCODE_ESCAPE) {
+      sapp_request_quit();
+    }
+  }
+}
+
 void cleanup(void) {
     sg_shutdown();
 }
@@ -73,6 +81,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
     return (sapp_desc){
         .init_cb = init,
         .frame_cb = frame,
+        .event_cb = event,
         .cleanup_cb = cleanup,
         .width = 640,
         .height = 480,
