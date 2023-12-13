@@ -203,7 +203,6 @@ CB_b32 shdc_compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
   return result;
 }
 
-
 CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
 {
   CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);

@@ -65,13 +65,6 @@ struct Indices {
   CB_size len;
 };
 
-typedef struct Text_Chunk Text_Chunk;
-struct Text_Chunk {
-  CB_u8 *items;
-  CB_size capacity;
-  CB_size len;
-};
-
 #define GAP_BUFFER_CHUNK_SIZE (4096)
 
 typedef int Buffer_Position;
@@ -283,7 +276,7 @@ static void init(void)
     sapp_request_quit();
   }
 
-  const char *const font_file_path = "./iosevka-regular.ttf";
+  const char *const font_file_path = "./vendor/iosevka-regular.ttf";
 
   error = FT_New_Face(state.library, font_file_path, 0, &state.face);
   if (error == FT_Err_Unknown_File_Format) {
