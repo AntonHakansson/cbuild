@@ -53,6 +53,10 @@ typedef CB_i32   CB_b32;
 #ifndef CB_assert
 #  define CB_assert(c)  while((!(c))) __builtin_unreachable()
 #endif
+
+#define CB_min(a, b)  (((a) < (b)) ? (a) : (b))
+#define CB_max(a, b)  (((a) > (b)) ? (a) : (b))
+#define CB_clamp(v, min, max)  (CB_max(CB_min((v), (max)), (min)))
 #define cb_return_defer(r)  do { result = (r); goto defer; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -69,12 +73,14 @@ typedef struct {
 } CB_Arena;
 
 CB_Arena *cb_alloc_arena(CB_size capacity);
-void   cb_free_arena(CB_Arena *arena);
+void      cb_free_arena(CB_Arena *arena);
 
 CB_Arena cb_arena_init(CB_u8 *backing, CB_size capacity);
 __attribute__((malloc, alloc_size(2,4), alloc_align(3)))
 CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count);
+void cb_arena_reset(CB_Arena *a);
 
+//-- Arena Marker / Temporary Arena
 typedef struct {
   CB_Arena *arena;
   CB_u8 *marker;
@@ -83,6 +89,7 @@ typedef struct {
 CB_Arena_Mark cb_arena_push_mark(CB_Arena *a);
 void cb_arena_pop_mark(CB_Arena_Mark a);
 
+//-- Scratch Arena
 #define SCRATCH_ARENA_COUNT 2
 #define SCRATCH_ARENA_CAPACITY (8 * 1024 * 1024)
 
@@ -95,7 +102,7 @@ void cb_free_scratch_pool(void);
 
 #define S(s)        (CB_Str){ .buf = (CB_u8 *)(s), .len = CB_countof((s)) - 1, }
 #define S_FMT       "%.*s"
-#define S_ARG(s)    (i32)(s).len, (s).buf
+#define S_ARG(s)    (CB_i32)(s).len, (s).buf
 
 typedef struct {
   CB_u8 *buf;
@@ -105,12 +112,12 @@ typedef struct {
 CB_Str cb_str_from_cstr(char *str);
 CB_Str cb_str_dup_cstr(CB_Arena *a, char *str);
 CB_Str cb_to_str(char *str);
-char *cb_str_to_cstr(CB_Arena *a, CB_Str s);
-CB_b32 cb_str_equals(CB_Str a, CB_Str b);
+char  *cb_str_to_cstr(CB_Arena *a, CB_Str s);
 
+CB_b32 cb_str_equals(CB_Str a, CB_Str b);
 CB_Str cb_str_chop_right(CB_Str str, unsigned char delim);
 
-
+//-- String Array
 typedef struct {
   CB_Str *items;
   CB_size capacity;
@@ -123,7 +130,7 @@ CB_Str_List cb_str_dup_list_(CB_Arena *arena, const char *cstrs[], CB_size len);
    (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
 
 ////////////////////////////////////////////////////////////////////////////////
-//- Buffered IO
+//- Write Buffer / Buffered IO
 //
 // Credit: nullprogram(u/skeeto)
 //
@@ -146,6 +153,7 @@ void    cb_append_str(CB_Write_Buffer *b, CB_Str s);
 void    cb_append_byte(CB_Write_Buffer *b, unsigned char c);
 void    cb_append_long(CB_Write_Buffer *b, long x);
 
+//-- Write Buffer as String builder
 typedef struct {
   CB_Write_Buffer *b;
   CB_u8 *at;
@@ -172,7 +180,7 @@ CB_Str cb_str_from_mark(CB_Str_Mark *mark);
 })
 
 // Allocates on demand
-#define cb_push(a, s) ({                                                \
+#define cb_da_push(a, s) ({                                             \
       typeof(s) _s = s;                                                 \
       if (_s->len >= _s->capacity) {                                    \
         cb_da_grow((a), (void **)&_s->items, &_s->capacity, &_s->len,   \
@@ -183,7 +191,7 @@ CB_Str cb_str_from_mark(CB_Str_Mark *mark);
     })
 
 // Assumes new item fits in capacity
-#define da_push_unsafe(s) ({                       \
+#define cb_da_push_unsafe(s) ({                    \
       CB_assert((s)->len < (s)->capacity);         \
       (s)->items + (s)->len++;                     \
     })
@@ -249,11 +257,16 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
 
 #define CB_INVALID_PROC (-1)
 typedef int CB_Proc;
-int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr);
+CB_Proc cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr);
 CB_b32 cb_cmd_run_sync(CB_Command command, CB_Write_Buffer* stderr);
 CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr);
 
-
+typedef struct CB_Procs CB_Procs;
+struct CB_Procs {
+  CB_Proc *items;
+  CB_size capacity;
+  CB_size len;
+};
 
 
 #ifdef CBUILD_IMPLEMENTATION
@@ -322,7 +335,7 @@ CB_Str_List cb_str_dup_list_(CB_Arena *arena, const char *cstrs[], CB_size len)
 {
   CB_Str_List result = cb_da_init(arena, CB_Str_List, 32);
   for (CB_size i = 0; i < len; i++) {
-    *(cb_push(arena, &result)) = cb_str_dup_cstr(arena, (char *)cstrs[i]);
+    *(cb_da_push(arena, &result)) = cb_str_dup_cstr(arena, (char *)cstrs[i]);
   }
   return result;
 }
@@ -359,6 +372,7 @@ CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count
   CB_size padding = -(CB_size)((CB_uptr)a->at) & (align - 1);
   CB_size total   = padding + objsize * count;
   if (avail < total) {
+    CB_assert(0 && "Out of memory");
     cb_write(2, (CB_u8 *)"Out of Memory", 13);
     cb_exit(1);
   }
@@ -370,6 +384,13 @@ CB_u8 *cb_arena_alloc(CB_Arena *a, CB_size objsize, CB_size align, CB_size count
   CB_memset(p, 0, (CB_usize)(objsize * count));
 
   return p;
+}
+
+void cb_arena_reset(CB_Arena *a)
+{
+  // TODO a->at might alias with itself!!!!
+  ASAN_POISON_MEMORY_REGION(a->backing + sizeof(*a), (CB_usize)a->capacity - sizeof(*a));
+  a->at = a->backing + sizeof(*a);
 }
 
 CB_Arena *cb_alloc_arena(CB_size capacity)
@@ -497,6 +518,7 @@ void cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len)
     src += amount;
 
     if (amount < left) {
+      CB_assert(b->fd >= 0 && "Not a file - buffer overflow!");
       cb_flush(b);
     }
   }
@@ -619,7 +641,7 @@ void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt)
 
 void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg)
 {
-  *(cb_push(arena, cmd)) = arg;
+  *(cb_da_push(arena, cmd)) = arg;
 }
 
 void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
@@ -627,7 +649,7 @@ void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
 {
   for (CB_size i = 0; i < lits_len; i++) {
     CB_Str str = cb_str_from_cstr((char *)lits[i]);
-    *(cb_push(arena, cmd)) = str;
+    *(cb_da_push(arena, cmd)) = str;
   }
 }
 
@@ -670,6 +692,7 @@ CB_u8 *cb_malloc(CB_size amount)
 {
   CB_u8 *mem = (CB_u8 *)malloc((CB_usize)amount);
   if (mem == 0) {
+    CB_assert(0 && "Out of memory");
     cb_write(2, (CB_u8 *)"Out of memory\n", 15);
     cb_exit(1);
   }
@@ -971,7 +994,7 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
   cb_arena_pop_mark(scratch);
 }
 
-int cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
+CB_Proc cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
 {
   CB_assert(command.len >= 1);
 

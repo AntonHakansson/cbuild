@@ -8,10 +8,7 @@
       inherit (nixpkgs.lib) genAttrs systems;
       forAllSystems = genAttrs systems.flakeExposed;
       pkgsFor = forAllSystems (system:
-        import nixpkgs {
-          inherit system;
-          # overlays = [ self.overlays.default ];
-        });
+        import nixpkgs { inherit system; });
     in
     {
       devShells = forAllSystems (s:

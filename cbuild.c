@@ -7,45 +7,208 @@
 #include "build/config.h"
 #endif
 
+CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  CB_b32 result = 0;
+
+  CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 4 * 1024);
+
+  CB_Str freetype_out = S("build/libfreetype.a");
+  #define FREETYPE_LOC "vendor/freetype/"
+  CB_Str_List freetype_sources = cb_str_dup_list(scratch.arena,
+    FREETYPE_LOC "src/autofit/autofit.c",
+    FREETYPE_LOC "src/base/ftbase.c",
+    FREETYPE_LOC "src/base/ftsystem.c",
+    FREETYPE_LOC "src/base/ftdebug.c",
+    FREETYPE_LOC "src/base/ftbbox.c",
+    FREETYPE_LOC "src/base/ftbdf.c",
+    FREETYPE_LOC "src/base/ftbitmap.c",
+    FREETYPE_LOC "src/base/ftcid.c",
+    FREETYPE_LOC "src/base/ftfstype.c",
+    FREETYPE_LOC "src/base/ftgasp.c",
+    FREETYPE_LOC "src/base/ftglyph.c",
+    FREETYPE_LOC "src/base/ftgxval.c",
+    FREETYPE_LOC "src/base/ftinit.c",
+    FREETYPE_LOC "src/base/ftmm.c",
+    FREETYPE_LOC "src/base/ftotval.c",
+    FREETYPE_LOC "src/base/ftpatent.c",
+    FREETYPE_LOC "src/base/ftpfr.c",
+    FREETYPE_LOC "src/base/ftstroke.c",
+    FREETYPE_LOC "src/base/ftsynth.c",
+    FREETYPE_LOC "src/base/fttype1.c",
+    FREETYPE_LOC "src/base/ftwinfnt.c",
+    FREETYPE_LOC "src/bdf/bdf.c",
+    FREETYPE_LOC "src/bzip2/ftbzip2.c",
+    FREETYPE_LOC "src/cache/ftcache.c",
+    FREETYPE_LOC "src/cff/cff.c",
+    FREETYPE_LOC "src/cid/type1cid.c",
+    FREETYPE_LOC "src/gzip/ftgzip.c",
+    FREETYPE_LOC "src/lzw/ftlzw.c",
+    FREETYPE_LOC "src/pcf/pcf.c",
+    FREETYPE_LOC "src/pfr/pfr.c",
+    FREETYPE_LOC "src/psaux/psaux.c",
+    FREETYPE_LOC "src/pshinter/pshinter.c",
+    FREETYPE_LOC "src/psnames/psnames.c",
+    FREETYPE_LOC "src/raster/raster.c",
+    FREETYPE_LOC "src/sdf/sdf.c",
+    FREETYPE_LOC "src/sfnt/sfnt.c",
+    FREETYPE_LOC "src/smooth/smooth.c",
+    FREETYPE_LOC "src/svg/svg.c",
+    FREETYPE_LOC "src/truetype/truetype.c",
+    FREETYPE_LOC "src/type1/type1.c",
+    FREETYPE_LOC "src/type42/type42.c",
+    FREETYPE_LOC "src/winfonts/winfnt.c");
+
+  CB_Str_List obj_files = cb_da_init(scratch.arena, CB_Str_List, 128);
+  { // freetype/**/*/<base>.c -> build/freetype/<base>.o
+    for (CB_size i = 0; i < freetype_sources.len; i++) {
+      CB_Str base = cb_str_chop_right(freetype_sources.items[i], '.');
+      CB_Str left = cb_str_chop_right(base, '/');
+      base.len = base.len - left.len - 1;
+      base.buf = base.buf + left.len + 1;
+      CB_Str_Mark mark = cb_write_buffer_mark(b);
+      cb_append_lit(b, "build/freetype/");
+      cb_append_str(b, base);
+      cb_append_lit(b, ".o");
+      CB_Str obj = cb_str_from_mark(&mark);
+      *(cb_da_push(scratch.arena, &obj_files)) = obj;
+    }
+  }
+
+  int status = cb_needs_rebuild(freetype_out, freetype_sources.items, freetype_sources.len, stderr);
+  if      (status <  0) { cb_return_defer(0); }
+  if      (status == 0) { cb_return_defer(1); }
+  else if (status >  0) {
+    cb_log_emit(stderr, CB_LOG_INFO, S("Building Freetype2 lib ... "));
+    if (!cb_mkdir_if_not_exists(S("build/freetype"), stderr)) cb_return_defer(0);
+
+    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 128);
+    CB_Procs procs = cb_da_init(scratch.arena, CB_Procs, 128);
+
+    for (CB_size i = 0; i < freetype_sources.len; i++) {
+      cmd.len = 0;
+
+      cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o");
+      cb_cmd_append(scratch.arena, &cmd, obj_files.items[i]);
+      cb_cmd_append_lits(scratch.arena, &cmd, "-c");
+      cb_cmd_append(scratch.arena, &cmd, freetype_sources.items[i]);
+      cb_cmd_append_lits(scratch.arena, &cmd, "-I" FREETYPE_LOC "include");
+      cb_cmd_append_lits(scratch.arena, &cmd, "-DFT2_BUILD_LIBRARY");
+      cb_cmd_append_lits(scratch.arena, &cmd, "-DHAVE_UNISTD_H");
+
+      *(cb_da_push(scratch.arena, &procs)) = cb_cmd_run_async(cmd, stderr);
+    }
+
+    for (CB_size i = 0; i < procs.len; i++) {
+      if (!cb_proc_wait(procs.items[i], stderr)) { continue; }
+    }
+
+    cmd.len = 0;
+    cb_cmd_append_lits(scratch.arena, &cmd, "ar", "-r");
+    cb_cmd_append(scratch.arena, &cmd, freetype_out);
+    for (CB_size i = 0; i < obj_files.len; i++) {
+      cb_cmd_append(scratch.arena, &cmd, obj_files.items[i]);
+    }
+    if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+    cb_return_defer(1);
+  }
+
+ CB_assert(0 && "unreachable");
+ defer:
+  cb_arena_pop_mark(scratch);
+  return result;
+}
+
+void cmd_freetype_flags(CB_Arena *arena, CB_Command *cmd)
+{
+  cb_cmd_append_lits(arena, cmd, "-I./vendor/freetype/include/", "-Lbuild/", "-lfreetype");
+}
+
 CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
 {
   CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
   CB_b32 result = 0;
 
   CB_Str sokol_out = S("build/libsokol.a");
+  #define SOKOL_LOC "vendor/sokol/"
   CB_Str sokol_sources[] = {
     S("src/sokol.c"),
-    S("vendor/sokol/sokol_app.h"),
-    S("vendor/sokol/sokol_gfx.h"),
-    S("vendor/sokol/sokol_time.h"),
-    S("vendor/sokol/sokol_fetch.h"),
-    S("vendor/sokol/sokol_log.h"),
-    S("vendor/sokol/sokol_glue.h"),
+    S(SOKOL_LOC "sokol_app.h"),
+    S(SOKOL_LOC "sokol_gfx.h"),
+    S(SOKOL_LOC "sokol_time.h"),
+    S(SOKOL_LOC "sokol_fetch.h"),
+    S(SOKOL_LOC "sokol_log.h"),
+    S(SOKOL_LOC "sokol_glue.h"),
   };
   int status = cb_needs_rebuild(sokol_out, sokol_sources, CB_countof(sokol_sources), stderr);
-  if (status < 0) { cb_return_defer(0); }
-  else if (status > 0) {
+  if (status <  0) { cb_return_defer(0); }
+  if (status == 0) { cb_return_defer(1); }
+  if (status >  0) {
     cb_log_emit(stderr, CB_LOG_INFO, S("Building Sokol Library ..."));
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    char *sokol_out_cstr = cb_str_to_cstr(scratch.arena, sokol_out);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", sokol_out_cstr, "-c", "src/sokol.c");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-I./vendor/sokol/");
+    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o");
+    cb_cmd_append(scratch.arena, &cmd, sokol_out);
+    cb_cmd_append_lits(scratch.arena, &cmd, "-c", "src/sokol.c");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-I" SOKOL_LOC);
     cb_cmd_append_lits(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
 #if SOKOL_DEBUG
     cb_cmd_append_lits(scratch.arena, &cmd, "-g");
 #else
-     cb_cmd_append_lits(scratch.arena, &cmd, "-O2");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-O2");
 #endif
 
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+    cb_return_defer(1);
   }
 
-  cb_return_defer(1);
-
+ CB_assert(0 && "unreachable");
  defer:
   cb_arena_pop_mark(scratch);
   return result;
 }
+
+void cmd_sokol_flags(CB_Arena *arena, CB_Command *cmd)
+{
+  cb_cmd_append_lits(arena, cmd, "-I./vendor/sokol/", "-Lbuild/", "-lsokol");
+  cb_cmd_append_lits(arena, cmd, "-DSOKOL_GLCORE33");
+  cb_cmd_append_lits(arena, cmd, "-pthread");
+  cb_cmd_append_lits(arena, cmd, "-lGL");
+  cb_cmd_append_lits(arena, cmd, "-lX11", "-lXi", "-lXcursor");
+}
+
+CB_b32 compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  CB_b32 result = 0;
+
+  CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
+  CB_Str_Mark mark = cb_write_buffer_mark(b);
+  cb_append_str(b, shader);
+  cb_append_lit(b, ".h");
+  CB_Str shader_h = cb_str_from_mark(&mark);
+
+  int status = cb_needs_rebuild(shader_h, &shader, 1, stderr);
+  if (status <  0) { cb_return_defer(0); }
+  if (status == 0) { cb_return_defer(1); }
+  if (status >  0) {
+    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
+    cb_cmd_append_lits(scratch.arena, &cmd, "./vendor/sokol-tools-bin/bin/linux/sokol-shdc");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-l", "glsl330");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-i");
+    cb_cmd_append     (scratch.arena, &cmd, shader);
+    cb_cmd_append_lits(scratch.arena, &cmd, "-o");
+    cb_cmd_append     (scratch.arena, &cmd, shader_h);
+    if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+    cb_return_defer(1);
+  }
+
+ CB_assert(0 && "unreachable");
+ defer:
+  cb_arena_pop_mark(scratch);
+  return result;
+}
+
 
 CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
 {
@@ -65,25 +228,7 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   cb_append_lit(b, ".glsl");
   CB_Str shader = cb_str_from_mark(&mark);
 
-  cb_append_lit(b, "./src/sokol-examples/");
-  cb_append_str(b, program);
-  cb_append_lit(b, ".glsl");
-  cb_append_lit(b, ".h");
-  CB_Str shader_h =  cb_str_from_mark(&mark);
-
-  int status_shader = cb_needs_rebuild(shader_h, &shader, 1, stderr);
-  if (status_shader < 0) { cb_return_defer(0); }
-  else if (status_shader > 0) {
-    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    char *shader_cstr = cb_str_to_cstr(scratch.arena, shader);
-    char *shader_h_cstr = cb_str_to_cstr(scratch.arena, shader_h);
-    cb_cmd_append_lits(scratch.arena, &cmd, "./vendor/sokol-tools-bin/bin/linux/sokol-shdc");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-l", "glsl330");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-i", shader_cstr);
-    cb_cmd_append_lits(scratch.arena, &cmd, "-o", shader_h_cstr);
-
-    if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
-  }
+  if (!compile_shader(shader, stderr)) { cb_return_defer(0); }
 
   mark = cb_write_buffer_mark(b);
   cb_append_lit(b, "build/");
@@ -92,8 +237,9 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
 
   CB_Str sapp_sources[] = { source, shader };
   int status = cb_needs_rebuild(exe, sapp_sources, CB_countof(sapp_sources), stderr);
-  if (status < 0) { cb_return_defer(0); }
-  else if (status > 0) {
+  if (status <  0) { cb_return_defer(0); }
+  if (status == 0) { cb_return_defer(1); }
+  if (status >  0) {
     cb_log_begin(stderr, CB_LOG_INFO, S("Building Sokol example: "));
     cb_log_end(stderr, program);
 
@@ -101,17 +247,62 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
     char *exe_cstr = cb_str_to_cstr(scratch.arena, exe);
     char *program_cstr = cb_str_to_cstr(scratch.arena, source);
     cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", exe_cstr, program_cstr);
-    cb_cmd_append_lits(scratch.arena, &cmd, "-I./vendor/sokol/", "-Lbuild/", "-lsokol");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-pthread");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-lGL");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-lX11", "-lXi", "-lXcursor");
     cb_cmd_append_lits(scratch.arena, &cmd, "-g");
+    cmd_sokol_flags(scratch.arena, &cmd);
+    if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+    cb_return_defer(1);
+  }
+
+ CB_assert(0 && "unreachable");
+ defer:
+  cb_arena_pop_mark(scratch);
+  return result;
+}
+
+CB_b32 build_editor(CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  CB_b32 result = 0;
+  CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
+
+  CB_Str program_name = S("editor");
+
+  CB_Str_Mark mark = cb_write_buffer_mark(b);
+
+  cb_append_lit(b, "./src/editor.c");
+  CB_Str source = cb_str_from_mark(&mark);
+
+  cb_append_lit(b, "./build/");
+  cb_append_str(b, program_name);
+  CB_Str exe = cb_str_from_mark(&mark);
+
+  CB_Str shader = S("./src/editor.glsl");
+  if (!compile_shader(shader, stderr)) { cb_return_defer(0); }
+
+  CB_Str sapp_sources[] = { source, shader };
+  int status = cb_needs_rebuild(exe, sapp_sources, CB_countof(sapp_sources), stderr);
+  if (status <  0) { cb_return_defer(0); }
+  if (status == 0) { cb_return_defer(1); }
+  if (status >  0) {
+    cb_log_emit(stderr, CB_LOG_INFO, S("Building Editor.c: "));
+
+    CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
+    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o");
+    cb_cmd_append(scratch.arena, &cmd, exe);
+    cb_cmd_append(scratch.arena, &cmd, source);
+    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined,address");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-lm");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-g");
+    /* cb_cmd_append_lits(scratch.arena, &cmd, "-O2", "-march=native"); */
+    cmd_sokol_flags(scratch.arena, &cmd);
+    cmd_freetype_flags(scratch.arena, &cmd);
 
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+    cb_return_defer(1);
   }
-  cb_return_defer(1);
 
+  CB_assert(0 && "unreachable");
  defer:
   cb_arena_pop_mark(scratch);
   return result;
@@ -125,7 +316,9 @@ int main(int argc, char **argv)
 
   // Configure program i.e. write default build/config.h if it does not exist.
   CB_b32 user_requested_to_reconfigure = (argc > 1);
-  if (!cb_file_exists(S("build/config.h"), stderr) || user_requested_to_reconfigure) {
+  CB_b32 config_h_exists = cb_file_exists(S("build/config.h"), stderr);
+  if (config_h_exists < 0) { cb_exit(1); }
+  if (config_h_exists == 0 || user_requested_to_reconfigure) {
     cb_log_emit(stderr, CB_LOG_INFO, S("Reconfiguring cbuild ..."));
     if (!cb_mkdir_if_not_exists(S("build"), stderr)) cb_exit(1);
 
@@ -165,7 +358,6 @@ int main(int argc, char **argv)
   cb_rebuild_yourself(argc, argv, cbuild_configured_sources, 0, stderr);
 
 #ifdef CBUILD_CONFIGURED
-
   cb_log_emit(stderr, CB_LOG_INFO, S("Config:"));
   CB_Read_Result conf = cb_read_entire_file(perm, S("build/config.h"), stderr);
   if (!conf.status) { cb_exit(1); }
@@ -173,10 +365,15 @@ int main(int argc, char **argv)
 
   { // Builder program
     cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
-#ifdef BUILD_SOKOL_EXAMPLE
+
+    if (!build_freetype_library(stderr)) cb_exit(1);
     if (!build_sokol_library(stderr)) cb_exit(1);
+#ifdef BUILD_SOKOL_EXAMPLE
     if (!build_sokol_example(S("triangle-sapp"), stderr)) cb_exit(1);
 #endif
+    if (!build_editor(stderr)) { cb_exit(1); }
+
+    cb_log_emit(stderr, CB_LOG_INFO, S("Done."));
   }
 #endif
 
