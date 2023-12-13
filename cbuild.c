@@ -297,6 +297,8 @@ int main(int argc, char **argv)
   CB_Write_Buffer *stderr = cb_fd_buffer(2, perm, 4 * 1024);
   CB_Str_List cbuild_sources = cb_str_dup_list(perm, "cbuild.c", "cbuild.h");
 
+  // REVIEW: Abort if cbuild is not run from project root.
+
   // Configure program i.e. write default build/config.h if it does not exist.
   CB_b32 user_requested_to_reconfigure = (argc > 1);
   CB_b32 config_h_exists = cb_file_exists(S("build/config.h"), stderr);

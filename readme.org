@@ -2,16 +2,15 @@
 
 Opinionated proof-of-concept build system/library using C.
 Describe how to build your project in C instead of a Domain Specific Language (DSL).
-No need to learn or install tools for Makefiles, CMake, Ninja, etc.
+No need to install, learn, or debug tools such as Makefiles, CMake, Ninja, etc.
 The build tool(e.g. gnumake, cmake) and describing how to build targets(e.g. Makefiles, CMakelists.txt) are consolidated into one program (cbuild).
 
 Highlights:
-- No external dependencies; just libc and a compiler(gcc, clang, msvc).
-- Not limited by DSL. Who doesn't want render the build progress on a GPU in realtime?
-- Single header library.
-- Debug build tool and build recipe with a debugger.
-- [WIP] Cross-platform (only linux for now)
-- Reuse =cbuild.h= for scaffolding your C/C++ program with arena memory management, dynamic arrays, string-builder/slices, and cross-platform abstraction.
+- Single header library with no external dependencies except libc and a compiler(gcc, clang).
+- Not limited by DSL. Use C to do whatever you want at build time!
+- Debug your build process using tools available for C (gdb, sanitizers, etc.)
+- [WIP] Suitable for cross-platform builds (only linux for now)
+- Reuse =cbuild.h= for scaffolding your C program with arena memory management, dynamic arrays, string-builder/slices, and small platform abstraction.
 
 * Quickstart
 
@@ -21,20 +20,41 @@ Highlights:
 #+end_src
 
 On subsequent changes to =cbuild.c= you do not have to recompile manually.
-Just rerun ~./cbuild~, and the build tool re-compiles itself.
+Run =./cbuild= and the build tool re-compiles itself.
 
 * Future ideas
 
 Some ideas that will probably never come to fruition.
+
+** Rebuild target when hash of build function changed
+
+Right now we rebuild targets(including cbuild itself) when the last modified timestamp of source files are newer than the target output file.
+A more granular approach is to compute a hash for functions that describe how to build a target and recompile both cbuild and the target when the hash is updated.
+
+#+begin_src C
+  #define CBUILD_HASH
+
+  CBUILD_HASH CB_b32 build_foo(...) { ... }
+
+  cb_compute_hashes("./cbuild.c");
+  char *old_hash = ...; // read from disk
+  CB_b32 foo_needs_rebuild = cb_changed(build_foo, old_hash)
+#+end_src
+
+A drawback of this approach is that we have to store the hashes on disk - maybe introduce =build/cbuild.cache=.
+Another wild idea would be to embed the hashes into the cbuild executable itself.
 
 ** Export minimally viable CMake for compatibility
 
 Export the most basic cmake project for distribution.
 All Package Maintainers probably know how to make CMake work.
 
+To do this we need to build a tree of dependencies between targets that clashes with our current immediate mode design.
+I think it's possible to keep the immediate paradigm and defer compiling the targets to the end.
+
 ** Metaprogramming
 
-Make it easy to introspect C code base and metaprogram i.e. parse C and output C.
+Make it easy to introspect C code and metaprogram (i.e. parse C and output C).
 Get access to compile time type info, or seamlessly implement custom language features etc.
 Also, compared to preprocessor macros, the metaprogram, and its output, is typesafe and debuggable.
 
@@ -48,7 +68,7 @@ Also, compared to preprocessor macros, the metaprogram, and its output, is types
   #else
   // The output of the metaprogram could be commited in the source tree
   // to guarantee the program compiles without cbuild.
-  #include "foo.meta.c"
+  #include "foo.meta.c" // output of the metaprogram would go in here
   /* foo.meta.c:
     typedef struct { char **items; size len;  } SLice_Char;
     // .. typeinfo about Slice_Char
@@ -60,6 +80,6 @@ Also, compared to preprocessor macros, the metaprogram, and its output, is types
 
 * References / Influences
 
-- tsoding :: nob, REBUILD_YOURSELF macro
-- nullprogram :: dynamic arrays, string builder and more
-- ryanfj :: arena memory management
+- tsoding :: [[https://github.com/tsoding/nobuild][nob]], [[https://github.com/tsoding/musializer/blob/0cc08f5e8844ac730163b5bc77607cc1d91991bc/src/nob.h#L224][REBUILD_YOURSELF]] macro
+- nullprogram :: [[https://nullprogram.com/blog/2023/10/05/][dynamic arrays]], [[https://nullprogram.com/blog/2023/02/13/][string builder]] and [[https://nullprogram.com/blog/2023/10/08/][more]]
+- ryanjfleury :: [[https://www.rfleury.com/p/untangling-lifetimes-the-arena-allocator][arena memory management]]
