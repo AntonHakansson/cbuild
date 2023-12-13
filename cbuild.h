@@ -150,8 +150,11 @@ void cb_flush(CB_Write_Buffer *b);
 void    cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len);
 #define cb_append_lit(b, s) cb_append(b, (unsigned char*)s, CB_sizeof(s) - 1)
 void    cb_append_str(CB_Write_Buffer *b, CB_Str s);
+#define cb_append_strs(b, ...) cb_append_strs_((b), ((CB_Str[]){__VA_ARGS__}), CB_countof(((CB_Str[]){__VA_ARGS__})))
 void    cb_append_byte(CB_Write_Buffer *b, unsigned char c);
 void    cb_append_long(CB_Write_Buffer *b, long x);
+
+void cb_append_strs_(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len);
 
 //-- Write Buffer as String builder
 typedef struct {
@@ -161,6 +164,7 @@ typedef struct {
 
 CB_Str_Mark cb_write_buffer_mark(CB_Write_Buffer *b);
 CB_Str cb_str_from_mark(CB_Str_Mark *mark);
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Dynamic Array
@@ -230,10 +234,17 @@ CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
 void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg);
 void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
                          CB_size lits_len);
+void cb_cmd_append_strs_(CB_Arena *arena, CB_Command *cmd, CB_Str *strs,
+                         CB_size strs_len);
 #define cb_cmd_append_lits(arena, cmd, ...)                             \
   cb_cmd_append_lits_(arena, cmd,                                       \
                       ((const char*[]){__VA_ARGS__}),                   \
-                      (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
+                      (CB_countof(((const char*[]){__VA_ARGS__}))))
+#define cb_cmd_append_strs(arena, cmd, ...)                             \
+  cb_cmd_append_strs_(arena, cmd,                                       \
+                      ((CB_Str[]){__VA_ARGS__}),                        \
+                      (CB_countof(((CB_Str[]){__VA_ARGS__}))))
+
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -549,6 +560,13 @@ void cb_append_long(CB_Write_Buffer *b, long x)
   cb_append(b, beg, end-beg);
 }
 
+void cb_append_strs_(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len)
+{
+  for (CB_size i = 0; i < strs_len; i++) {
+    cb_append_str(b, strs[i]);
+  }
+}
+
 void cb_flush(CB_Write_Buffer *b)
 {
   b->error |= b->fd < 0;
@@ -569,10 +587,17 @@ CB_Str_Mark cb_write_buffer_mark(CB_Write_Buffer *b)
 CB_Str cb_str_from_mark(CB_Str_Mark *mark)
 {
   CB_Str result = {0};
-  result.buf = mark->at;
-  result.len = (mark->b->buf + mark->b->len) - mark->at;
-  CB_assert(result.len > 0 && "We expact at least one character here.");
-  mark->at = result.buf + result.len;
+
+  CB_size len_between_marks = (mark->b->buf + mark->b->len) - mark->at;
+  if (len_between_marks < 0) {
+    CB_assert(0 && "This probably means the buffer overflowed/flushed inbetween marks.");
+  }
+  else {
+    result.buf = mark->at;
+    result.len = len_between_marks;
+  }
+
+  mark->at = (mark->b->buf + mark->b->len);
   return result;
 }
 
@@ -652,6 +677,15 @@ void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
     *(cb_da_push(arena, cmd)) = str;
   }
 }
+
+void cb_cmd_append_strs_(CB_Arena *arena, CB_Command *cmd, CB_Str *strs,
+                         CB_size strs_len)
+{
+  for (CB_size i = 0; i < strs_len; i++) {
+    *(cb_da_push(arena, cmd)) = strs[i];
+  }
+}
+
 
 CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf)
 {
