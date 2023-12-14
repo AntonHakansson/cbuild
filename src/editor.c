@@ -21,8 +21,8 @@
 #define GLYPH_FONT_SIZE (64)
 #define GLYPH_METRICS_CAPACITY 128
 
-#define MAX_VERTICES 1024
-#define MAX_INDICES (4 * 1024)
+#define MAX_VERTICES 4 * 1024
+#define MAX_INDICES (3 * MAX_VERTICES)
 
 typedef struct Glyph_Metric Glyph_Metric;
 struct Glyph_Metric {
@@ -490,20 +490,17 @@ static void frame(void)
   const float t = (float)(sapp_frame_duration() * 60.0);
   state.elapsed_time += t;
 
-  hmm_mat4 proj = HMM_Orthographic(0.f, w, 0.f, h, 0.f, 10.0f);
-  hmm_mat4 view = HMM_MultiplyMat4(HMM_Scale(HMM_Vec3(state.editor->camera_zoom, state.editor->camera_zoom, 0)),
-                                   HMM_Translate(HMM_Vec3(-state.editor->camera_pos.X, -state.editor->camera_pos.Y, 0.f)));
-  vs_params_t vs_params = { .mvp = HMM_MultiplyMat4(proj, view), };
 
   hmm_v4   white = HMM_Vec4(1.f, 1.f, 1.f, 1.f);
   Vertices verts  = cb_da_init(state.frame_arena, Vertices, 1024);
   Indices  indices = cb_da_init(state.frame_arena, Indices, 4096);
 
+
   { // Render Editor
     editor_recalc_lines(state.editor);
 
     Glyph_Atlas *atlas = &state.glyph_atlas;
-    hmm_vec2 text_pos = HMM_Vec2(5.f, h - state.glyph_atlas.height * 1.5f);
+    hmm_vec2 text_pos = HMM_Vec2(5.f, 0);
     hmm_vec2 cursor_pos = {0};
     float max_width = 0;
     for (CB_size i = 0; i < state.editor->lines_len; i++) {
@@ -522,7 +519,7 @@ static void frame(void)
 
         if (cursor_visible) {
           push_rect(&indices, &verts,
-                    HMM_Vec2(cursor_pos.X, cursor_pos.Y + GLYPH_FONT_SIZE), HMM_Vec2(10, -GLYPH_FONT_SIZE),
+                    HMM_Vec2(cursor_pos.X, cursor_pos.Y + GLYPH_FONT_SIZE - 10.f), HMM_Vec2(10, -GLYPH_FONT_SIZE),
                     white);
         }
       }
@@ -535,21 +532,32 @@ static void frame(void)
     }
 
     // interpolate editor camera
-    state.editor->target_camera_pos = HMM_Vec2(0, (cursor_pos.Y - h/2));
-    state.editor->camera_pos
-      = HMM_AddVec2(state.editor->camera_pos,
-                    HMM_MultiplyVec2f(HMM_SubtractVec2(state.editor->target_camera_pos,
-                                                       state.editor->camera_pos),
-                                      0.88f));
+    {
+      state.editor->target_camera_pos = HMM_Vec2(0.f, cursor_pos.Y);
+      state.editor->camera_pos
+        = HMM_AddVec2(state.editor->camera_pos,
+                      HMM_MultiplyVec2f(HMM_SubtractVec2(state.editor->target_camera_pos,
+                                                         state.editor->camera_pos),
+                                        0.88f));
 
-    state.editor->target_camera_zoom = CB_clamp((w / (max_width + 10.f)), 0.3f, 1.3f);
-    state.editor->camera_zoom += (state.editor->target_camera_zoom - state.editor->camera_zoom) * 0.88f;
+      state.editor->target_camera_zoom = CB_clamp((w / (max_width + 10.f)), 0.3f, 1.3f);
+      state.editor->camera_zoom += (state.editor->target_camera_zoom - state.editor->camera_zoom) * 0.88f;
+    }
   }
 
   if (indices.len > 0) {
     sg_update_buffer(state.vbuf, CB_RANGE(verts));
     sg_update_buffer(state.ibuf, CB_RANGE(indices));
   }
+
+  // Update Camera Transform
+  hmm_mat4 proj = HMM_Orthographic(0.f, w, 0.f, h, 0.f, 10.0f);
+  hmm_mat4 centered_cam_in_y =
+    HMM_MultiplyMat4(HMM_Translate(HMM_Vec3(0.f, h * .5f, 0.f)),
+                     HMM_Scale(HMM_Vec3(state.editor->camera_zoom, state.editor->camera_zoom, 1.0f)));
+  hmm_mat4 view = HMM_MultiplyMat4(centered_cam_in_y,
+                                   HMM_Translate(HMM_Vec3(-state.editor->camera_pos.X, -state.editor->camera_pos.Y, 0.f)));
+  vs_params_t vs_params = { .mvp = HMM_MultiplyMat4(proj, view), };
 
   sg_begin_default_pass(&state.pass_action, sapp_width(), sapp_height());
   sg_apply_pipeline(state.pip);
