@@ -149,7 +149,7 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
     cb_cmd_append_strs(scratch.arena, &cmd, S("-c"), S("src/sokol.c"));
     cb_cmd_append_lits(scratch.arena, &cmd, "-I" SOKOL_LOC);
     cb_cmd_append_lits(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
-#if SOKOL_DEBUG
+#if defined(SOKOL_DEBUG)
     cb_cmd_append_lits(scratch.arena, &cmd, "-g");
 #else
     cb_cmd_append_lits(scratch.arena, &cmd, "-O2");
@@ -273,7 +273,7 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
     cb_cmd_append_lits(scratch.arena, &cmd, "cc");
     cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), exe, source);
     cb_cmd_append_lits(scratch.arena, &cmd, "-lm");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined,address");
+    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
     cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra");
     cb_cmd_append_lits(scratch.arena, &cmd, "-g");
     /* cb_cmd_append_lits(scratch.arena, &cmd, "-O2", "-march=native"); */
@@ -351,6 +351,7 @@ int main(int argc, char **argv)
     if (!conf.status) { cb_exit(1); }
     cb_append_str(stderr, conf.file_contents);
   }
+
   {// Builder program
     cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
 

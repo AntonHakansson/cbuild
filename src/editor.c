@@ -1,3 +1,5 @@
+// Nate - not a text editor
+
 #include "sokol_app.h"
 #include "sokol_gfx.h"
 #include "sokol_log.h"
@@ -16,7 +18,7 @@
 
 #define CB_RANGE(cb) &(sg_range){ .ptr = (cb).items, .size = (cb).len * sizeof((cb).items[0])}
 
-#define GLYPH_FONT_SIZE 64
+#define GLYPH_FONT_SIZE (64)
 #define GLYPH_METRICS_CAPACITY 128
 
 #define MAX_VERTICES 1024
@@ -37,7 +39,7 @@ struct Glyph_Metric {
 };
 
 typedef struct Glyph_Atlas Glyph_Atlas;
-struct Glyph_Atlas{
+struct Glyph_Atlas {
   FT_UInt width;
   FT_UInt height;
   sg_image image;
@@ -65,145 +67,107 @@ struct Indices {
   CB_size len;
 };
 
-#define GAP_BUFFER_CHUNK_SIZE (4096)
 
-typedef int Buffer_Position;
-typedef struct Gap_Buffer Gap_Buffer;
-struct Gap_Buffer {
-  CB_u8 buf[GAP_BUFFER_CHUNK_SIZE];
-  CB_size buf_capacity;
-  Buffer_Position gap_start;
-  Buffer_Position gap_end;
-  // Gap_Buffer *next; // TODO: Maybe chain
+#define TEXT_CHUNK_SIZE (10 * 1024)
+
+typedef struct Text_Chunk Text_Chunk;
+struct Text_Chunk {
+  CB_u8 buf[TEXT_CHUNK_SIZE];
+  CB_size len;
+  //  Text_Chunk *next;
 };
-
-Gap_Buffer *new_gap_buffer(CB_Arena *arena)
-{
-  Gap_Buffer *gb = new(arena, Gap_Buffer, 1);
-  gb->buf_capacity = GAP_BUFFER_CHUNK_SIZE;
-  gb->gap_end = GAP_BUFFER_CHUNK_SIZE;
-  return gb;
-}
-
-void gb_shift_gap_to(Gap_Buffer *gb, Buffer_Position cursor)
-{
-  CB_size gap_len = gb->gap_end - gb->gap_start;
-  CB_assert(gap_len >= 0);
-  cursor = CB_min(cursor, gb->buf_capacity - gap_len);
-  if (cursor == gb->gap_start) { return; }
-
-  if (gb->gap_start < cursor) {
-    // buf:    12345....6789abdc
-    // cursor: .......|.........
-    // buf':   1234567....89abdc
-    CB_usize delta = cursor - gb->gap_start;
-    CB_memcpy(&gb->buf[gb->gap_start], &gb->buf[gb->gap_end], delta);
-    gb->gap_start += delta;
-    gb->gap_end   += delta;
-  }
-  else if (gb->gap_start > cursor) {
-    // buf:    12345....6789abdc
-    // cursor: ..|...............
-    // buf':   12....3456789abdc
-    CB_usize delta = gb->gap_start - cursor;
-    CB_memcpy(&gb->buf[gb->gap_end - delta], &gb->buf[gb->gap_start - delta], delta);
-    gb->gap_start -= delta;
-    gb->gap_end   -= delta;
-  }
-}
-
-void gb_insert_char(Gap_Buffer *gb, Buffer_Position cursor, CB_u8 c)
-{
-  // TODO check bounds
-  gb_shift_gap_to(gb, cursor);
-  gb->buf[gb->gap_start] = c;
-  gb->gap_start++;
-}
-
-void gb_delete(Gap_Buffer *gb, Buffer_Position cursor, CB_size n_bytes)
-{
-  // TODO check bounds
-  CB_assert(n_bytes > 0);
-  gb_shift_gap_to(gb, cursor);
-  gb->gap_start = CB_max(gb->gap_start - n_bytes, 0);
-  CB_memset(&gb->buf[gb->gap_start], 0, n_bytes);
-}
-
-typedef struct Gap_Buffer_Result Gap_Buffer_Result;
-struct Gap_Buffer_Result {
-  CB_Str left;
-  CB_Str right;
-};
-
-Gap_Buffer_Result gb_get_strings(Gap_Buffer *gb)
-{
-  Gap_Buffer_Result result = {0};
-  result.left.buf = gb->buf;
-  result.left.len = gb->gap_start;
-  result.right.buf = gb->buf + gb->gap_end;
-  result.right.len = gb->buf_capacity - gb->gap_end;
-  return result;
-}
 
 enum {
-  EDITOR_LINES_DIRTY = 1 << 1,
+  EDITOR_LINES_DIRTY = 1 << 0,
+};
+
+typedef int Buffer_Position;
+
+typedef struct Line Line;
+struct Line {
+  Buffer_Position start;
+  Buffer_Position end;
 };
 
 typedef struct Editor Editor;
 struct Editor {
   CB_u32 flags;
   Buffer_Position cursor;
-
-  Gap_Buffer *gap_buffer;
-
-  CB_Str  lines[GAP_BUFFER_CHUNK_SIZE];
+  Text_Chunk *text_buffer;
+  Line lines[TEXT_CHUNK_SIZE];
   CB_size lines_len;
+
+  hmm_vec2 camera_pos;
+  hmm_vec2 target_camera_pos;
+  float camera_zoom;
+  float target_camera_zoom;
 };
 
-Editor *new_editor(CB_Arena *arena)
+static Editor *new_editor(CB_Arena *arena)
 {
   Editor *result     = new(arena, Editor, 1);
-  result->gap_buffer = new_gap_buffer(arena);
+  result->text_buffer = new(arena, Text_Chunk, 1);
+  result->flags |= EDITOR_LINES_DIRTY;
+  result->camera_zoom = 1.f;
   return result;
 }
 
-void editor_recalc_line_(Editor *ed, CB_Str str)
-{
-  CB_size line_start_idx = 0;
-  CB_size line_one_past_end_idx = 0;
-
-  for (CB_size i = 0; i < str.len; i++) {
-    CB_Str *line = &ed->lines[ed->lines_len];
-    CB_u8 c = str.buf[i];
-
-    if (c == '\n') {
-      line_one_past_end_idx = i;
-      line_start_idx = i + 1;
-      ed->lines_len++;
-    }
-    else {
-      line_one_past_end_idx = i + 1;
-
-      line->buf = str.buf + line_start_idx;
-      line->len = line_one_past_end_idx - line_start_idx;
-    }
-  }
-}
-
-void editor_recalc_lines(Editor *ed)
+static void editor_recalc_lines(Editor *ed)
 {
   if (!(ed->flags & EDITOR_LINES_DIRTY)) return;
 
+  CB_memset(ed->lines, 0, ed->lines_len * sizeof(ed->lines[0]));
   ed->lines_len = 0;
 
-  Gap_Buffer_Result halfs = gb_get_strings(ed->gap_buffer);
-  editor_recalc_line_(ed, halfs.left);
-  editor_recalc_line_(ed, halfs.right);
+  {
+    Line line = {0};
+    for (CB_size i = 0; i < ed->text_buffer->len; i++) {
+      if (ed->text_buffer->buf[i] == '\n') {
+        line.end = i;
+        ed->lines[ed->lines_len++] = line;
+        line.start = i + 1;
+      }
+    }
+    line.end = ed->text_buffer->len;
+    ed->lines[ed->lines_len++] = line;
+  }
 
   ed->flags &= ~(EDITOR_LINES_DIRTY);
 }
 
-void editor_event(Editor *ed, const sapp_event* e)
+static void editor_ins(Editor *ed, char c)
+{
+  CB_assert(ed->text_buffer->len < TEXT_CHUNK_SIZE);
+  ed->flags |= EDITOR_LINES_DIRTY;
+
+  CB_u8 *buf =  ed->text_buffer->buf;
+  CB_size len =  ed->text_buffer->len;
+  Buffer_Position cursor = ed->cursor;
+
+  memmove(buf + cursor + 1, buf + cursor, len - cursor);
+
+  ed->text_buffer->buf[cursor] = c;
+  ed->text_buffer->len++;
+  ed->cursor += 1;
+}
+
+static void editor_bspc(Editor *ed)
+{
+  if (ed->cursor <= 0) return;
+
+  ed->flags |= EDITOR_LINES_DIRTY;
+
+  CB_u8 *buf =  ed->text_buffer->buf;
+  CB_size len =  ed->text_buffer->len;
+  Buffer_Position cursor = ed->cursor;
+
+  int amount = 1;
+  memmove(buf + cursor - amount, buf + cursor, len - cursor);
+  ed->text_buffer->len -= amount;
+  ed->cursor -= amount;
+}
+
+static void editor_event(Editor *ed, const sapp_event* e)
 {
   if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {
     if (e->key_code == SAPP_KEYCODE_LEFT) {
@@ -214,27 +178,121 @@ void editor_event(Editor *ed, const sapp_event* e)
     }
 
     if (e->key_code == SAPP_KEYCODE_BACKSPACE) {
-      gb_delete(ed->gap_buffer, ed->cursor, 1);
-      ed->cursor--;
-      ed->flags |= EDITOR_LINES_DIRTY;
+      editor_bspc(ed);
     }
 
     if (e->key_code == SAPP_KEYCODE_ENTER) {
-      gb_insert_char(ed->gap_buffer, ed->cursor, '\n');
-      ed->flags |= EDITOR_LINES_DIRTY;
-      ed->cursor += 1;
+      editor_ins(ed, '\n');
     }
   }
 
   if (e->type == SAPP_EVENTTYPE_CHAR) {
     if (e->char_code >= 32 && e->char_code < 128) {
-      gb_insert_char(ed->gap_buffer, ed->cursor, e->char_code);
-      ed->flags |= EDITOR_LINES_DIRTY;
-      ed->cursor += 1;
+      editor_ins(ed, e->char_code);
     }
   }
 
-  ed->cursor = CB_clamp(ed->cursor, 0, ed->gap_buffer->buf_capacity - 1);
+  ed->cursor = CB_clamp(ed->cursor, 0, ed->text_buffer->len);
+}
+
+static void push_vertex(Vertices *verts, hmm_v3 pos, hmm_v4 color, hmm_v2 uv)
+{
+  CB_assert(verts->len < verts->capacity);
+  Vertex v = {0};
+  v.pos    = pos;
+  v.col  = color;
+  v.uv     = uv;
+
+  *cb_da_push_unsafe(verts) = v;
+}
+
+static void push_image_rect(Indices *indices, Vertices *verts, hmm_v2 pos, hmm_v2 dim, hmm_v2 uv_pos, hmm_v2 uv_dim, hmm_v4 col)
+{
+  CB_assert(indices->len < indices->capacity);
+  hmm_v3 p0 = HMM_Vec3(pos.X + 0.0f,  pos.Y + 0.0f,  0.f);
+  hmm_v3 p1 = HMM_Vec3(pos.X + dim.X, pos.Y + 0.0f,  0.f);
+  hmm_v3 p2 = HMM_Vec3(pos.X + dim.X, pos.Y + dim.Y, 0.f);
+  hmm_v3 p3 = HMM_Vec3(pos.X + 0.f,   pos.Y + dim.Y, 0.f);
+
+  hmm_v2 uv0 = HMM_Vec2(uv_pos.X + 0.f,      uv_pos.Y + 0.f);
+  hmm_v2 uv1 = HMM_Vec2(uv_pos.X + uv_dim.X, uv_pos.Y + 0.f);
+  hmm_v2 uv2 = HMM_Vec2(uv_pos.X + uv_dim.X, uv_pos.Y + uv_dim.Y);
+  hmm_v2 uv3 = HMM_Vec2(uv_pos.X + 0.f,      uv_pos.Y + uv_dim.Y);
+
+  CB_size i = verts->len;
+  push_vertex(verts, p0, col, uv0);
+  push_vertex(verts, p1, col, uv1);
+  push_vertex(verts, p2, col, uv2);
+  push_vertex(verts, p3, col, uv3);
+
+  *(cb_da_push_unsafe(indices)) = i + 0;
+  *(cb_da_push_unsafe(indices)) = i + 1;
+  *(cb_da_push_unsafe(indices)) = i + 2;
+  *(cb_da_push_unsafe(indices)) = i + 3;
+  *(cb_da_push_unsafe(indices)) = i + 0;
+  *(cb_da_push_unsafe(indices)) = i + 2;
+}
+
+static void push_rect(Indices *indices, Vertices *verts, hmm_v2 pos, hmm_v2 dim, hmm_v4 col)
+{
+  CB_assert(indices->len < indices->capacity);
+
+  hmm_v3 p0 = HMM_Vec3(pos.X + 0.0f,  pos.Y + 0.0f,  0.f);
+  hmm_v3 p1 = HMM_Vec3(pos.X + dim.X, pos.Y + 0.0f,  0.f);
+  hmm_v3 p2 = HMM_Vec3(pos.X + dim.X, pos.Y + dim.Y, 0.f);
+  hmm_v3 p3 = HMM_Vec3(pos.X + 0.f,   pos.Y + dim.Y, 0.f);
+
+  // Special white texture region
+  hmm_v2 uv0 = HMM_Vec2(1.f, 0.f);
+  hmm_v2 uv1 = HMM_Vec2(1.f, 0.f);
+  hmm_v2 uv2 = HMM_Vec2(1.f, 0.f);
+  hmm_v2 uv3 = HMM_Vec2(1.f, 0.f);
+
+  CB_size i = verts->len;
+  push_vertex(verts, p0, col, uv0);
+  push_vertex(verts, p1, col, uv1);
+  push_vertex(verts, p2, col, uv2);
+  push_vertex(verts, p3, col, uv3);
+
+  *(cb_da_push_unsafe(indices)) = i + 0;
+  *(cb_da_push_unsafe(indices)) = i + 1;
+  *(cb_da_push_unsafe(indices)) = i + 2;
+  *(cb_da_push_unsafe(indices)) = i + 3;
+  *(cb_da_push_unsafe(indices)) = i + 0;
+  *(cb_da_push_unsafe(indices)) = i + 2;
+}
+
+typedef struct Text_Bounding_Box Text_Bounding_Box;
+struct Text_Bounding_Box {
+  hmm_vec2 bottom_left;
+  hmm_vec2 top_right;
+};
+
+void push_text_line(Indices *indices, Vertices *verts, Glyph_Atlas *atlas, hmm_vec2 *pos, CB_Str text, hmm_v4 color)
+{
+  for (CB_size i = 0; i < text.len; i++) {
+    CB_usize glyph_index = text.buf[i];
+    // TODO support glyphs outside ascii range
+    if (glyph_index < 32 || glyph_index >= GLYPH_METRICS_CAPACITY) {
+      glyph_index = '?';
+    }
+    Glyph_Metric metric = atlas->metrics[glyph_index];
+    float x2 =  pos->X + metric.bl;
+    float y2 = -pos->Y - metric.bt;
+    float w  = metric.bw;
+    float h  = metric.bh;
+
+    pos->X += metric.ax;
+    pos->Y += metric.ay;
+
+    if (indices && verts) {
+      push_image_rect(indices, verts,
+                      HMM_Vec2(x2, -y2), HMM_Vec2(w, -h),
+                      HMM_Vec2(metric.tx, 0.0f),
+                      HMM_Vec2(metric.bw / (float)atlas->width, metric.bh  / (float)atlas->height),
+                      color);
+    }
+  }
 }
 
 static struct {
@@ -249,13 +307,13 @@ static struct {
 
   Editor *editor;
 
+  fs_params_t fs_params;
   sg_buffer vbuf;
   sg_buffer ibuf;
   Glyph_Atlas glyph_atlas;
   FT_Library library;
   FT_Face face;
 } state;
-
 
 static void init(void)
 {
@@ -276,7 +334,7 @@ static void init(void)
     sapp_request_quit();
   }
 
-  const char *const font_file_path = "./vendor/iosevka-regular.ttf";
+  const char *const font_file_path = "./vendor/IosevkaTermNerdFont-Regular.ttf";
 
   error = FT_New_Face(state.library, font_file_path, 0, &state.face);
   if (error == FT_Err_Unknown_File_Format) {
@@ -312,9 +370,12 @@ static void init(void)
     }
   }
 
-  uint8_t *pixels = new(state.perm_arena, uint8_t, atlas->width * atlas->height);
-  int x = 0;
+  CB_i32 white_texture_dim = 64;
+  atlas->width += white_texture_dim;
 
+  uint8_t *pixels = new(state.frame_arena, uint8_t, atlas->width * atlas->height);
+
+  int x = 0;
   for (int i = start_i; i < end_i; i++) {
     if (FT_Load_Char(face, i, load_flags)) {
       fprintf(stderr, "ERROR: could not load glyph of a character with code %d\n", i);
@@ -345,6 +406,16 @@ static void init(void)
     x += face->glyph->bitmap.width;
   }
 
+  // Blit white texture at the end
+  // @speed: blit using GPU, SIMD
+  for (CB_size row = 0; row < white_texture_dim; row++) {
+    for (CB_size col = 0; col < white_texture_dim; col++) {
+      int idx = row * atlas->width + x + col;
+      uint8_t p = 0xFF; // white!!!
+      pixels[idx] = p;
+    }
+  }
+
   atlas->image = sg_make_image(&(sg_image_desc){
     .width = atlas->width,
     .height = atlas->height,
@@ -360,8 +431,8 @@ static void init(void)
   }
 
   sg_sampler smp = sg_make_sampler(&(sg_sampler_desc){
-    .min_filter = SG_FILTER_NEAREST,
-    .mag_filter = SG_FILTER_NEAREST,
+    .min_filter = SG_FILTER_LINEAR,
+    .mag_filter = SG_FILTER_LINEAR,
     .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
     .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
   });
@@ -396,7 +467,6 @@ static void init(void)
       .enabled = true,
       .src_factor_rgb   = SG_BLENDFACTOR_SRC_ALPHA,
       .dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-      .dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
     },
     .label = "ui-pipeline",
   });
@@ -412,98 +482,7 @@ static void init(void)
   };
 }
 
-void push_vertex(Vertices *verts, hmm_v3 pos, hmm_v4 color, hmm_v2 uv)
-{
-  CB_assert(verts->len < verts->capacity);
-  Vertex v = {0};
-  v.pos    = pos;
-  v.col  = color;
-  v.uv     = uv;
-
-  *cb_da_push_unsafe(verts) = v;
-}
-
-void push_image_rect(Indices *indices, Vertices *verts, hmm_v2 pos, hmm_v2 dim, hmm_v2 uv_pos, hmm_v2 uv_dim, hmm_v4 col)
-{
-  CB_assert(indices->len < indices->capacity);
-  hmm_v3 p0 = HMM_Vec3(pos.X + 0.0f,  pos.Y + 0.0f,  0.f);
-  hmm_v3 p1 = HMM_Vec3(pos.X + dim.X, pos.Y + 0.0f,  0.f);
-  hmm_v3 p2 = HMM_Vec3(pos.X + dim.X, pos.Y + dim.Y, 0.f);
-  hmm_v3 p3 = HMM_Vec3(pos.X + 0.f,   pos.Y + dim.Y, 0.f);
-
-  hmm_v2 uv0 = HMM_Vec2(uv_pos.X + 0.f,      uv_pos.Y + 0.f);
-  hmm_v2 uv1 = HMM_Vec2(uv_pos.X + uv_dim.X, uv_pos.Y + 0.f);
-  hmm_v2 uv2 = HMM_Vec2(uv_pos.X + uv_dim.X, uv_pos.Y + uv_dim.Y);
-  hmm_v2 uv3 = HMM_Vec2(uv_pos.X + 0.f,      uv_pos.Y + uv_dim.Y);
-
-  CB_size i = verts->len;
-  push_vertex(verts, p0, col, uv0);
-  push_vertex(verts, p1, col, uv1);
-  push_vertex(verts, p2, col, uv2);
-  push_vertex(verts, p3, col, uv3);
-
-  *(cb_da_push_unsafe(indices)) = i + 0;
-  *(cb_da_push_unsafe(indices)) = i + 1;
-  *(cb_da_push_unsafe(indices)) = i + 2;
-  *(cb_da_push_unsafe(indices)) = i + 3;
-  *(cb_da_push_unsafe(indices)) = i + 0;
-  *(cb_da_push_unsafe(indices)) = i + 2;
-}
-
-void push_rect(Indices *indices, Vertices *verts, hmm_v2 pos, hmm_v2 dim, hmm_v4 col)
-{
-  CB_assert(indices->len < indices->capacity);
-
-  hmm_v3 p0 = HMM_Vec3(pos.X + 0.0f,  pos.Y + 0.0f,  0.f);
-  hmm_v3 p1 = HMM_Vec3(pos.X + dim.X, pos.Y + 0.0f,  0.f);
-  hmm_v3 p2 = HMM_Vec3(pos.X + dim.X, pos.Y + dim.Y, 0.f);
-  hmm_v3 p3 = HMM_Vec3(pos.X + 0.f,   pos.Y + dim.Y, 0.f);
-
-  hmm_v2 uv0 = HMM_Vec2(0.f, 0.f);
-  hmm_v2 uv1 = HMM_Vec2(1.f, 0.f);
-  hmm_v2 uv2 = HMM_Vec2(1.f, 1.f);
-  hmm_v2 uv3 = HMM_Vec2(0.f, 1.f);
-
-  CB_size i = verts->len;
-  push_vertex(verts, p0, col, uv0);
-  push_vertex(verts, p1, col, uv1);
-  push_vertex(verts, p2, col, uv2);
-  push_vertex(verts, p3, col, uv3);
-
-  *(cb_da_push_unsafe(indices)) = i + 0;
-  *(cb_da_push_unsafe(indices)) = i + 1;
-  *(cb_da_push_unsafe(indices)) = i + 2;
-  *(cb_da_push_unsafe(indices)) = i + 3;
-  *(cb_da_push_unsafe(indices)) = i + 0;
-  *(cb_da_push_unsafe(indices)) = i + 2;
-}
-
-void push_text_line(Indices *indices, Vertices *verts, Glyph_Atlas *atlas, hmm_vec2 *pos, CB_Str text, hmm_v4 color)
-{
-  for (CB_size i = 0; i < text.len; i++) {
-    CB_usize glyph_index = text.buf[i];
-    // TODO support glyphs outside ascii range
-    if (glyph_index < 32 || glyph_index >= GLYPH_METRICS_CAPACITY) {
-      glyph_index = '?';
-    }
-    Glyph_Metric metric = atlas->metrics[glyph_index];
-    float x2 =  pos->X + metric.bl;
-    float y2 = -pos->Y - metric.bt;
-    float w  = metric.bw;
-    float h  = metric.bh;
-
-    pos->X += metric.ax;
-    pos->Y += metric.ay;
-
-    push_image_rect(indices, verts,
-                    HMM_Vec2(x2, -y2), HMM_Vec2(w, -h),
-                    HMM_Vec2(metric.tx, 0.0f),
-                    HMM_Vec2(metric.bw / (float)atlas->width, metric.bh  / (float)atlas->height),
-                    color);
-  }
-}
-
-void frame(void)
+static void frame(void)
 {
   const float w = sapp_widthf();
   const float h = sapp_heightf();
@@ -511,29 +490,61 @@ void frame(void)
   const float t = (float)(sapp_frame_duration() * 60.0);
   state.elapsed_time += t;
 
-  vs_params_t vs_params = {0};
-  hmm_mat4 proj = HMM_Orthographic(0.f, 1080.f, 0.f, 1080.f / aspect, 0.f, 10.0f);
-  vs_params.mvp = proj;
+  hmm_mat4 proj = HMM_Orthographic(0.f, w, 0.f, h, 0.f, 10.0f);
+  hmm_mat4 view = HMM_MultiplyMat4(HMM_Scale(HMM_Vec3(state.editor->camera_zoom, state.editor->camera_zoom, 0)),
+                                   HMM_Translate(HMM_Vec3(-state.editor->camera_pos.X, -state.editor->camera_pos.Y, 0.f)));
+  vs_params_t vs_params = { .mvp = HMM_MultiplyMat4(proj, view), };
 
-  hmm_v4 white = HMM_Vec4(1.f, 1.f, 1.f, 1.f);
+  hmm_v4   white = HMM_Vec4(1.f, 1.f, 1.f, 1.f);
   Vertices verts  = cb_da_init(state.frame_arena, Vertices, 1024);
-  Indices indices = cb_da_init(state.frame_arena, Indices, 4096);
+  Indices  indices = cb_da_init(state.frame_arena, Indices, 4096);
 
-  Glyph_Atlas *atlas = &state.glyph_atlas;
+  { // Render Editor
+    editor_recalc_lines(state.editor);
 
-  editor_recalc_lines(state.editor);
+    Glyph_Atlas *atlas = &state.glyph_atlas;
+    hmm_vec2 text_pos = HMM_Vec2(5.f, h - state.glyph_atlas.height * 1.5f);
+    hmm_vec2 cursor_pos = {0};
+    float max_width = 0;
+    for (CB_size i = 0; i < state.editor->lines_len; i++) {
+      text_pos.X  = 5.f;
 
-  hmm_vec2 text_pos = HMM_Vec2(5.f, 750.f);
-  for (CB_size i = 0; i <= state.editor->lines_len; i++) {
-    text_pos.X  = 5.f;
-    push_text_line(&indices, &verts, atlas, &text_pos, state.editor->lines[i], white);
-    text_pos.Y -= 100.f;
+      Line line = state.editor->lines[i];
+      CB_Str str = (CB_Str){ .buf = &state.editor->text_buffer->buf[line.start], .len = line.end - line.start, };
+
+      // render cursor
+      Buffer_Position cursor = state.editor->cursor;
+      CB_b32 cursor_visible = ((int)(state.elapsed_time * 0.025f)) % 2 == 0;
+      if (line.start <= cursor && cursor <= line.end) {
+        CB_Str   str_up_to_cursor = (CB_Str){ .buf = &state.editor->text_buffer->buf[line.start], .len = cursor - line.start, };
+        cursor_pos = text_pos;
+        push_text_line(0, 0, atlas, &cursor_pos, str_up_to_cursor, white); // compute cursor pos
+
+        if (cursor_visible) {
+          push_rect(&indices, &verts,
+                    HMM_Vec2(cursor_pos.X, cursor_pos.Y + GLYPH_FONT_SIZE), HMM_Vec2(10, -GLYPH_FONT_SIZE),
+                    white);
+        }
+      }
+
+      // render text
+      push_text_line(&indices, &verts, atlas, &text_pos, str, white);
+
+      max_width = CB_max(max_width, text_pos.X);
+      text_pos.Y -= state.glyph_atlas.height;
+    }
+
+    // interpolate editor camera
+    state.editor->target_camera_pos = HMM_Vec2(0, (cursor_pos.Y - h/2));
+    state.editor->camera_pos
+      = HMM_AddVec2(state.editor->camera_pos,
+                    HMM_MultiplyVec2f(HMM_SubtractVec2(state.editor->target_camera_pos,
+                                                       state.editor->camera_pos),
+                                      0.88f));
+
+    state.editor->target_camera_zoom = CB_clamp((w / (max_width + 10.f)), 0.3f, 1.3f);
+    state.editor->camera_zoom += (state.editor->target_camera_zoom - state.editor->camera_zoom) * 0.88f;
   }
-
-  /* Gap_Buffer_Result halfs = gb_get_strings(state.editor->gap_buffer); */
-  /* push_text_line(&indices, &verts, atlas, &text_pos, halfs.left, white); */
-  /* push_text_line(&indices, &verts, atlas, &text_pos, halfs.right, white); */
-  /* push_rect(&indices, &verts, HMM_Vec2(state.editor->cursor, 0), HMM_Vec2(100.f, 500.f), white); */
 
   if (indices.len > 0) {
     sg_update_buffer(state.vbuf, CB_RANGE(verts));
@@ -544,6 +555,7 @@ void frame(void)
   sg_apply_pipeline(state.pip);
   sg_apply_bindings(&state.bind);
   sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
+  sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_params, &SG_RANGE(state.fs_params));
   sg_draw(0, indices.len, 1);
   sg_end_pass();
   sg_commit();
@@ -551,18 +563,28 @@ void frame(void)
   cb_arena_reset(state.frame_arena);
 }
 
-void event(const sapp_event* e)
+static void event(const sapp_event* e)
 {
   if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {
     if (e->key_code == SAPP_KEYCODE_ESCAPE) {
       sapp_request_quit();
     }
+
+    int delta = 0;
+    if (e->key_code == SAPP_KEYCODE_PAGE_DOWN) { delta = 1; }
+    else if(e->key_code == SAPP_KEYCODE_PAGE_UP) { delta = -1;}
+    state.fs_params.effect = ((unsigned int)(state.fs_params.effect + delta)) % 10;
+
+    float smoothness = 0;
+    if (e->key_code == SAPP_KEYCODE_HOME) { smoothness = .005f; }
+    else if(e->key_code == SAPP_KEYCODE_END) { smoothness = -.005f;}
+    state.fs_params.smoothness += smoothness;
   }
 
   editor_event(state.editor, e);
 }
 
-void cleanup(void)
+static void cleanup(void)
 {
   sg_shutdown();
 }

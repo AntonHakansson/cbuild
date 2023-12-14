@@ -24,17 +24,45 @@ void main() {
 uniform texture2D tex;
 uniform sampler   smp;
 
+uniform fs_params {
+  float smoothness;
+  int effect;
+};
+
 in vec4 color;
 in vec2 uv;
 
 out vec4 frag_color;
 
 void main() {
-  float d = texture(sampler2D(tex, smp), uv).r;
-  float aaf = fwidth(d);
-  float alpha = smoothstep(0.5 - aaf, 0.5 + aaf, d);
-  frag_color = vec4(color.rgb, alpha);
-  // frag_color = vec4(uv.xy, 1.0, 1.0);
+  if (effect == 0) {
+    float d = texture(sampler2D(tex, smp), uv).r;
+    float aaf = fwidth(d);
+    float alpha = smoothstep(0.5 - aaf, 0.5 + aaf, d);
+    frag_color = vec4(color.rgb, alpha);
+  }
+  else if (effect == 1) {
+    float d = texture(sampler2D(tex, smp), uv).r;
+    float alpha = smoothstep(0.5 - smoothness, 0.5 + smoothness, d);
+    frag_color = vec4(color.rgb, alpha);
+  }
+  else if (effect == 2) {
+    float d = texture(sampler2D(tex, smp), uv).r;
+    float alpha = 0;
+    if (d < 0.5) {
+      alpha = smoothstep(0.5 - smoothness, 0.5 + smoothness, d);
+    }
+    else {
+      alpha = .5 - smoothstep(0.5 - smoothness, 0.5 + smoothness, .75 * d);
+    }
+    frag_color = vec4(color.rgb, alpha);
+  }
+  else if (effect == 3) {
+    frag_color = texture(sampler2D(tex, smp), uv).r * vec4(1, 1, 1, 1);
+  }
+  else {
+    frag_color = vec4(color.rgb, 1);
+  }
 }
 @end
 

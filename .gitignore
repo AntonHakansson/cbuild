@@ -1,3 +1,11 @@
 # cbuild artifacts
 build/
 cbuild
+
+# nix artifacts
+flake.nix
+flake.lock
+
+# emacs artifacts
+.dir-locals.el
+
