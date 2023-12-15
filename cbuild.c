@@ -69,7 +69,7 @@ CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
       base.len = base.len - left.len - 1;
       base.buf = base.buf + left.len + 1;
       CB_Str_Mark mark = cb_write_buffer_mark(b);
-      cb_append_strs(b, S("build/freetype/"), base, S(".o"));
+      cb_append(b, S("build/freetype/"), base, S(".o"));
       CB_Str obj = cb_str_from_mark(&mark);
       *(cb_da_push(scratch.arena, &obj_files)) = obj;
     }
@@ -88,12 +88,12 @@ CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
     for (CB_size i = 0; i < freetype_sources.len; i++) {
       cmd.len = 0;
 
-      cb_cmd_append_lits(scratch.arena, &cmd, "cc");
-      cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), obj_files.items[i]);
-      cb_cmd_append_strs(scratch.arena, &cmd, S("-c"), freetype_sources.items[i]);
-      cb_cmd_append_lits(scratch.arena, &cmd, "-I" FREETYPE_LOC "include");
-      cb_cmd_append_lits(scratch.arena, &cmd, "-DFT2_BUILD_LIBRARY");
-      cb_cmd_append_lits(scratch.arena, &cmd, "-DHAVE_UNISTD_H");
+      cb_cmd_append_lit(scratch.arena, &cmd, "cc");
+      cb_cmd_append    (scratch.arena, &cmd, S("-o"), obj_files.items[i]);
+      cb_cmd_append    (scratch.arena, &cmd, S("-c"), freetype_sources.items[i]);
+      cb_cmd_append_lit(scratch.arena, &cmd, "-I" FREETYPE_LOC "include");
+      cb_cmd_append_lit(scratch.arena, &cmd, "-DFT2_BUILD_LIBRARY");
+      cb_cmd_append_lit(scratch.arena, &cmd, "-DHAVE_UNISTD_H");
 
       *(cb_da_push(scratch.arena, &procs)) = cb_cmd_run_async(cmd, stderr);
     }
@@ -103,7 +103,7 @@ CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
     }
 
     cmd.len = 0;
-    cb_cmd_append_strs(scratch.arena, &cmd, S("ar"), S("-r"), freetype_out);
+    cb_cmd_append(scratch.arena, &cmd, S("ar"), S("-r"), freetype_out);
     for (CB_size i = 0; i < obj_files.len; i++) {
       cb_cmd_append(scratch.arena, &cmd, obj_files.items[i]);
     }
@@ -119,7 +119,7 @@ CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
 
 void cmd_freetype_flags(CB_Arena *arena, CB_Command *cmd)
 {
-  cb_cmd_append_lits(arena, cmd, "-I./vendor/freetype/include/", "-Lbuild/", "-lfreetype");
+  cb_cmd_append_lit(arena, cmd, "-I./vendor/freetype/include/", "-Lbuild/", "-lfreetype");
 }
 
 CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
@@ -144,15 +144,15 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
   if (status >  0) {
     cb_log_emit(stderr, CB_LOG_INFO, S("Building Sokol Library ..."));
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc");
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), sokol_out);
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-c"), S("examples/sokol.c"));
-    cb_cmd_append_lits(scratch.arena, &cmd, "-I" SOKOL_LOC);
-    cb_cmd_append_lits(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
+    cb_cmd_append_lit(scratch.arena, &cmd, "cc");
+    cb_cmd_append    (scratch.arena, &cmd, S("-o"), sokol_out);
+    cb_cmd_append    (scratch.arena, &cmd, S("-c"), S("examples/sokol.c"));
+    cb_cmd_append_lit(scratch.arena, &cmd, "-I" SOKOL_LOC);
+    cb_cmd_append_lit(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
 #if defined(SOKOL_DEBUG)
-    cb_cmd_append_lits(scratch.arena, &cmd, "-g");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-g");
 #else
-    cb_cmd_append_lits(scratch.arena, &cmd, "-O2");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-O2");
 #endif
 
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
@@ -167,11 +167,11 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
 
 void cmd_sokol_flags(CB_Arena *arena, CB_Command *cmd)
 {
-  cb_cmd_append_lits(arena, cmd, "-I./vendor/sokol/", "-Lbuild/", "-lsokol");
-  cb_cmd_append_lits(arena, cmd, "-DSOKOL_GLCORE33");
-  cb_cmd_append_lits(arena, cmd, "-pthread");
-  cb_cmd_append_lits(arena, cmd, "-lGL");
-  cb_cmd_append_lits(arena, cmd, "-lX11", "-lXi", "-lXcursor");
+  cb_cmd_append_lit(arena, cmd, "-I./vendor/sokol/", "-Lbuild/", "-lsokol");
+  cb_cmd_append_lit(arena, cmd, "-DSOKOL_GLCORE33");
+  cb_cmd_append_lit(arena, cmd, "-pthread");
+  cb_cmd_append_lit(arena, cmd, "-lGL");
+  cb_cmd_append_lit(arena, cmd, "-lX11", "-lXi", "-lXcursor");
 }
 
 CB_b32 shdc_compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
@@ -181,7 +181,7 @@ CB_b32 shdc_compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
 
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
   CB_Str_Mark mark = cb_write_buffer_mark(b);
-  cb_append_strs(b, shader, S(".h"));
+  cb_append(b, shader, S(".h"));
   CB_Str shader_h = cb_str_from_mark(&mark);
 
   int status = cb_needs_rebuild(shader_h, &shader, 1, stderr);
@@ -189,10 +189,10 @@ CB_b32 shdc_compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
   if (status == 0) { cb_return_defer(1); }
   if (status >  0) {
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    cb_cmd_append_lits(scratch.arena, &cmd, "./vendor/sokol-tools-bin/bin/linux/sokol-shdc");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-l", "glsl330");
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-i"), shader);
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), shader_h);
+    cb_cmd_append_lit(scratch.arena, &cmd, "./vendor/sokol-tools-bin/bin/linux/sokol-shdc");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-l", "glsl330");
+    cb_cmd_append    (scratch.arena, &cmd, S("-i"), shader);
+    cb_cmd_append    (scratch.arena, &cmd, S("-o"), shader_h);
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
     cb_return_defer(1);
   }
@@ -211,13 +211,13 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
 
   CB_Str_Mark mark = cb_write_buffer_mark(b);
-  cb_append_strs(b, S("./examples/sokol-examples/"), program, S(".c"));
+  cb_append(b, S("./examples/sokol-examples/"), program, S(".c"));
   CB_Str source = cb_str_from_mark(&mark);
 
-  cb_append_strs(b, S("./examples/sokol-examples/"), program, S(".glsl"));
+  cb_append(b, S("./examples/sokol-examples/"), program, S(".glsl"));
   CB_Str shader = cb_str_from_mark(&mark);
 
-  cb_append_strs(b, S("build/"), program);
+  cb_append(b, S("build/"), program);
   CB_Str exe = cb_str_from_mark(&mark);
 
   if (!shdc_compile_shader(shader, stderr)) { cb_return_defer(0); }
@@ -227,14 +227,13 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   if (status <  0) { cb_return_defer(0); }
   if (status == 0) { cb_return_defer(1); }
   if (status >  0) {
-    cb_log_begin(stderr, CB_LOG_INFO, S("Building Sokol example: "));
-    cb_log_end(stderr, program);
+    cb_log_emit(stderr, CB_LOG_INFO, S("Building Sokol example: "), program);
 
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc");
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), exe);
-    cb_cmd_append_strs(scratch.arena, &cmd, source);
-    cb_cmd_append_lits(scratch.arena, &cmd, "-g");
+    cb_cmd_append_lit(scratch.arena, &cmd, "cc");
+    cb_cmd_append    (scratch.arena, &cmd, S("-o"), exe);
+    cb_cmd_append    (scratch.arena, &cmd, source);
+    cb_cmd_append_lit(scratch.arena, &cmd, "-g");
     cmd_sokol_flags(scratch.arena, &cmd);
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
     cb_return_defer(1);
@@ -257,7 +256,7 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
   CB_Str shader = S("./examples/editor/editor.glsl");
 
   CB_Str_Mark mark = cb_write_buffer_mark(b);
-  cb_append_strs(b, S("./build/"), program_name);
+  cb_append(b, S("./build/"), program_name);
   CB_Str exe = cb_str_from_mark(&mark);
 
   if (!shdc_compile_shader(shader, stderr)) { cb_return_defer(0); }
@@ -270,14 +269,14 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
     cb_log_emit(stderr, CB_LOG_INFO, S("Building Editor.c: "));
 
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc");
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), exe, source);
-    cb_cmd_append_lits(scratch.arena, &cmd, "-I./vendor/");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-lm");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-g");
-    /* cb_cmd_append_lits(scratch.arena, &cmd, "-O2", "-march=native"); */
+    cb_cmd_append_lit(scratch.arena, &cmd, "cc");
+    cb_cmd_append    (scratch.arena, &cmd, S("-o"), exe, source);
+    cb_cmd_append_lit(scratch.arena, &cmd, "-I./vendor/");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-lm");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=undefined");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-Wall", "-Wextra");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-g");
+    /* cb_cmd_append_lit(scratch.arena, &cmd, "-O2", "-march=native"); */
     cmd_sokol_flags(scratch.arena, &cmd);
     cmd_freetype_flags(scratch.arena, &cmd);
 
@@ -310,29 +309,29 @@ int main(int argc, char **argv)
     CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
     CB_Write_Buffer *conf = cb_mem_buffer(scratch.arena, 8 * 1024);
 
-    cb_append_lit(conf, "// One of [ TARGET_WINDOWS, TARGET_LINUX ].\n");
+    cb_append(conf, S("// One of [ TARGET_WINDOWS, TARGET_LINUX ].\n"));
 #ifdef _WIN32
-    cb_append_lit(conf, "#define TARGET_WINDOWS\n");
+    cb_append(conf, S("#define TARGET_WINDOWS\n"));
 #else
-    cb_append_lit(conf, "#define TARGET_LINUX\n");
+    cb_append(conf, S("#define TARGET_LINUX\n"));
 #endif
 
 #if 0
     CB_Command git = cb_da_init(scratch.arena, CB_Command, 32);
-    cb_cmd_append_lits(scratch.arena, &git, "git", "rev-parse", "--short", "HEAD");
+    cb_cmd_append_lit(scratch.arena, &git, "git", "rev-parse", "--short", "HEAD");
     cb_cmd_run_sync(git, stderr);
 #endif
     CB_Str git_commit = S("ebc58eb");
 
-    cb_append_strs(conf,
-                   S("#define GIT_COMMIT \""),
-                   git_commit,
-                   S("\"\n"));
+    cb_append(conf,
+                  S("#define GIT_COMMIT \""),
+                  git_commit,
+                  S("\"\n"));
 
-    cb_append_lit(conf, "// Build sokol sapp-triangle example.\n");
-    cb_append_lit(conf, "// #define BUILD_SOKOL_EXAMPLE\n");
-    cb_append_lit(conf, "// Enable to build sokol with debug information and disable optimizations.\n");
-    cb_append_lit(conf, "// #define SOKOL_DEBUG\n");
+    cb_append(conf, S("// Build sokol sapp-triangle example.\n"));
+    cb_append(conf, S("// #define BUILD_SOKOL_EXAMPLE\n"));
+    cb_append(conf, S("// Enable to build sokol with debug information and disable optimizations.\n"));
+    cb_append(conf, S("// #define SOKOL_DEBUG\n"));
 
     CB_Str content = (CB_Str){.buf = conf->buf, .len = conf->len, };
     if (!cb_write_entire_file(S("build/config.h"), content, stderr)) cb_exit(1);
@@ -350,16 +349,16 @@ int main(int argc, char **argv)
     cb_log_emit(stderr, CB_LOG_INFO, S("Config:"));
     CB_Read_Result conf = cb_read_entire_file(perm, S("build/config.h"), stderr);
     if (!conf.status) { cb_exit(1); }
-    cb_append_str(stderr, conf.file_contents);
+    cb_append(stderr, conf.file_contents);
   }
 
-  {// Builder program
+  { // Builder program
     cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
 
-    if (!build_freetype_library(stderr)) cb_exit(1);
-    if (!build_sokol_library(stderr)) cb_exit(1);
+    if (!build_freetype_library(stderr)) { cb_exit(1); }
+    if (!build_sokol_library(stderr)) { cb_exit(1); }
 #ifdef BUILD_SOKOL_EXAMPLE
-    if (!build_sokol_example(S("triangle-sapp"), stderr)) cb_exit(1);
+    if (!build_sokol_example(S("triangle-sapp"), stderr)) { cb_exit(1); }
 #endif
     if (!build_editor(stderr)) { cb_exit(1); }
 

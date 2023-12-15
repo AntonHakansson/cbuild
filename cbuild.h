@@ -125,9 +125,11 @@ typedef struct {
 } CB_Str_List;
 
 CB_Str_List cb_str_dup_list_(CB_Arena *arena, const char *cstrs[], CB_size len);
+
 #define cb_str_dup_list(arena, ...)                             \
-  cb_str_dup_list_(arena, ((const char*[]){__VA_ARGS__}),        \
+  cb_str_dup_list_(arena, ((const char*[]){__VA_ARGS__}),       \
    (CB_sizeof(((const char*[]){__VA_ARGS__}))/(CB_sizeof(const char*))))
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Write Buffer / Buffered IO
@@ -147,14 +149,12 @@ CB_Write_Buffer *cb_mem_buffer(CB_Arena *a, CB_size capacity);
 CB_Write_Buffer *cb_fd_buffer(CB_i32 fd, CB_Arena *a, CB_size capacity);
 void cb_flush(CB_Write_Buffer *b);
 
-void    cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len);
-#define cb_append_lit(b, s) cb_append(b, (unsigned char*)s, CB_sizeof(s) - 1)
-void    cb_append_str(CB_Write_Buffer *b, CB_Str s);
-#define cb_append_strs(b, ...) cb_append_strs_((b), ((CB_Str[]){__VA_ARGS__}), CB_countof(((CB_Str[]){__VA_ARGS__})))
-void    cb_append_byte(CB_Write_Buffer *b, unsigned char c);
-void    cb_append_long(CB_Write_Buffer *b, long x);
+void  cb_append_bytes(CB_Write_Buffer *b, unsigned char *src, CB_size len);
+void  cb_append_strs(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len);
+void  cb_append_byte(CB_Write_Buffer *b, unsigned char c);
+void  cb_append_long(CB_Write_Buffer *b, long x);
 
-void cb_append_strs_(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len);
+#define cb_append(b, ...) cb_append_strs((b), ((CB_Str[]){__VA_ARGS__}), CB_countof(((CB_Str[]){__VA_ARGS__})))
 
 //-- Write Buffer as String builder
 typedef struct {
@@ -216,10 +216,13 @@ typedef enum CB_Log_Level {
   CB_LOG_COUNT,
 } CB_Log_Level;
 
-void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level, CB_Str prefix);
-void cb_log_end(CB_Write_Buffer *b, CB_Str suffix);
-void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt);
+void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level);
+void cb_log_end(CB_Write_Buffer *b);
+void cb_log_emit_strs(CB_Write_Buffer *b, CB_Log_Level level, CB_Str *strs, CB_size strs_len);
 
+#define cb_log_emit(b, level, ...) cb_log_emit_strs(b, level, \
+  ((CB_Str[]){__VA_ARGS__}),                                  \
+  (CB_countof(((CB_Str[]){__VA_ARGS__}))))
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Command
@@ -230,19 +233,18 @@ typedef struct CB_Command {
   CB_size len;
 } CB_Command;
 
-CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
-void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg);
-void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
-                         CB_size lits_len);
-void cb_cmd_append_strs_(CB_Arena *arena, CB_Command *cmd, CB_Str *strs,
-                         CB_size strs_len);
-#define cb_cmd_append_lits(arena, cmd, ...)                             \
-  cb_cmd_append_lits_(arena, cmd,                                       \
-                      ((const char*[]){__VA_ARGS__}),                   \
-                      (CB_countof(((const char*[]){__VA_ARGS__}))))
-#define cb_cmd_append_strs(arena, cmd, ...)                             \
-  cb_cmd_append_strs_(arena, cmd,                                       \
-                      ((CB_Str[]){__VA_ARGS__}),                        \
+void cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf);
+void cb_cmd_append_lits(CB_Arena *arena, CB_Command *cmd, char **lits, CB_size lits_len);
+void cb_cmd_append_strs(CB_Arena *arena, CB_Command *cmd, CB_Str *strs, CB_size strs_len);
+
+#define cb_cmd_append_lit(arena, cmd, ...)                            \
+  cb_cmd_append_lits(arena, cmd,                                      \
+                      ((char *[]){__VA_ARGS__}),                      \
+                      (CB_countof(((char *[]){__VA_ARGS__}))))
+
+#define cb_cmd_append(arena, cmd, ...)                                \
+  cb_cmd_append_strs(arena, cmd,                                      \
+                      ((CB_Str[]){__VA_ARGS__}),                      \
                       (CB_countof(((CB_Str[]){__VA_ARGS__}))))
 
 
@@ -303,14 +305,14 @@ CB_Str cb_str_dup_cstr(CB_Arena *a, char *str)
 {
   CB_Str s = cb_str_from_cstr(str);
   CB_Write_Buffer *b = cb_mem_buffer(a, s.len);
-  cb_append_str(b, s);
+  cb_append(b, s);
   return (CB_Str){ .buf = b->buf, .len = s.len, };
 }
 
 char *cb_str_to_cstr(CB_Arena *a, CB_Str s)
 {
   CB_Write_Buffer *b = cb_mem_buffer(a, s.len + 1);
-  cb_append_str(b, s);
+  cb_append(b, s);
   cb_append_byte(b, '\0');
   return (char *)b->buf;
 }
@@ -513,7 +515,7 @@ CB_Write_Buffer *cb_fd_buffer(CB_i32 fd, CB_Arena *a, CB_size capacity)
   return result;
 }
 
-void cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len)
+void cb_append_bytes(CB_Write_Buffer *b, unsigned char *src, CB_size len)
 {
   CB_assert(b);
   unsigned char *end = src + len;
@@ -535,14 +537,9 @@ void cb_append(CB_Write_Buffer *b, unsigned char *src, CB_size len)
   }
 }
 
-void cb_append_str(CB_Write_Buffer *b, CB_Str s)
-{
-  cb_append(b, s.buf, s.len);
-}
-
 void cb_append_byte(CB_Write_Buffer *b, unsigned char c)
 {
-  cb_append(b, &c, 1);
+  cb_append_bytes(b, &c, 1);
 }
 
 void cb_append_long(CB_Write_Buffer *b, long x)
@@ -557,13 +554,14 @@ void cb_append_long(CB_Write_Buffer *b, long x)
   if (x < 0) {
     *--beg = '-';
   }
-  cb_append(b, beg, end-beg);
+  cb_append_bytes(b, beg, end-beg);
 }
 
-void cb_append_strs_(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len)
+void cb_append_strs(CB_Write_Buffer *b, CB_Str *strs, CB_size strs_len)
 {
   for (CB_size i = 0; i < strs_len; i++) {
-    cb_append_str(b, strs[i]);
+    CB_Str s = strs[i];
+    cb_append_bytes(b, s.buf, s.len);
   }
 }
 
@@ -628,78 +626,68 @@ void cb_da_grow(CB_Arena *arena, void ** items,
 ////////////////////////////////////////////////////////////////////////////////
 //- Log Implementation
 
-void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level, CB_Str prefix)
+void cb_log_begin(CB_Write_Buffer *b, CB_Log_Level level)
 {
-  CB_assert(CB_LOG_COUNT == 3 && "implement me");
+  CB_assert(CB_LOG_COUNT == 3 && "Unhandled case in switch statement.");
   switch (level) {
   case CB_LOG_ERROR: {
-    cb_append_lit(b, "[ERROR]: ");
+    cb_append(b, S("[ERROR]: "));
   } break;
   case CB_LOG_WARNING: {
-    cb_append_lit(b, "[WARNING]: ");
+    cb_append(b, S("[WARNING]: "));
   } break;
   case CB_LOG_INFO: {
-    cb_append_lit(b, "[INFO]: ");
+    cb_append(b, S("[INFO]: "));
   } break;
   default:
     CB_assert(0 && "unreachable");
   }
-  if (prefix.buf) cb_append_str(b, prefix);
 }
 
-void cb_log_end(CB_Write_Buffer *b, CB_Str suffix)
+void cb_log_end(CB_Write_Buffer *b)
 {
-  if (suffix.buf) cb_append_str(b, suffix);
   cb_append_byte(b, '\n');
   cb_flush(b);
 }
 
-void cb_log_emit(CB_Write_Buffer *b, CB_Log_Level level, CB_Str fmt)
+void cb_log_emit_strs(CB_Write_Buffer *b, CB_Log_Level level, CB_Str *strs, CB_size strs_len)
 {
-  cb_log_begin(b, level, fmt);
-  cb_log_end(b, (CB_Str){0});
+  cb_log_begin(b, level);
+  cb_append_strs(b, strs, strs_len);
+  cb_log_end(b);
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 //- Command Implementation
 
-void cb_cmd_append(CB_Arena *arena, CB_Command *cmd, CB_Str arg)
-{
-  *(cb_da_push(arena, cmd)) = arg;
-}
-
-void cb_cmd_append_lits_(CB_Arena *arena, CB_Command *cmd, const char *lits[],
-                         CB_size lits_len)
+void cb_cmd_append_lits(CB_Arena *arena, CB_Command *cmd, char **lits,
+                        CB_size lits_len)
 {
   for (CB_size i = 0; i < lits_len; i++) {
-    CB_Str str = cb_str_from_cstr((char *)lits[i]);
+    CB_Str str = cb_str_from_cstr(lits[i]);
     *(cb_da_push(arena, cmd)) = str;
   }
 }
 
-void cb_cmd_append_strs_(CB_Arena *arena, CB_Command *cmd, CB_Str *strs,
+void cb_cmd_append_strs(CB_Arena *arena, CB_Command *cmd, CB_Str *strs,
                          CB_size strs_len)
 {
   for (CB_size i = 0; i < strs_len; i++) {
-    *(cb_da_push(arena, cmd)) = strs[i];
+    CB_Str str = strs[i];
+    *(cb_da_push(arena, cmd)) = str;
   }
 }
 
 
-CB_Str cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf)
+void cb_cmd_render(CB_Command cmd, CB_Write_Buffer *buf)
 {
-  CB_Str result = {0};
-
-  CB_Str_Mark mark = cb_write_buffer_mark(buf);
   for (CB_size i = 0; i < cmd.len; i++) {
     if (i > 0) {
       cb_append_byte(buf, ' ');
     }
-    cb_append_str(buf, cmd.items[i]);
+    cb_append(buf, cmd.items[i]);
   }
-  result = cb_str_from_mark(&mark);
-  return result;
 }
 
 
@@ -746,11 +734,10 @@ CB_i32  cb_open(CB_Str filepath, CB_Write_Buffer *stderr)
   char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
   CB_i32 fd = open(c_filepath, O_RDWR | O_CREAT | O_TRUNC, 0755);
   if (fd < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
-      cb_append_str(stderr, filepath);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not open file \""),
+                filepath, S("\": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(0);
   }
   cb_return_defer(fd);
@@ -764,11 +751,12 @@ CB_b32 cb_close(CB_i32 fd, CB_Write_Buffer *stderr)
 {
   CB_i32 status = close(fd);
   if (status < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not close file (fd "));
+    cb_log_begin(stderr, CB_LOG_ERROR);
+      cb_append(stderr,  S("Could not close file (fd "));
       cb_append_long(stderr, fd);
-      cb_append_lit(stderr, "): ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+      cb_append(stderr, S("): "),
+                    cb_str_from_cstr(strerror(errno)));
+    cb_log_end(stderr);
     return 0;
   }
   return 1;
@@ -783,11 +771,11 @@ CB_b32 cb_file_exists(CB_Str filepath, CB_Write_Buffer *stderr)
   struct stat statbuf = {0};
   if (stat(c_filepath, &statbuf) < 0) {
     if (errno == ENOENT) { cb_return_defer(0); }
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
-      cb_append_str(stderr, filepath);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not stat "),
+                filepath,
+                S(": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(-1);
   }
   cb_return_defer(1);
@@ -805,11 +793,11 @@ CB_b32 cb_write_entire_file(CB_Str filepath, CB_Str content, CB_Write_Buffer *st
   char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
   CB_i32 fd = open(c_filepath, O_WRONLY | O_CREAT | O_TRUNC, 0755);
   if (fd < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
-      cb_append_str(stderr, filepath);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not open file "),
+                filepath,
+                S(": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(0);
   }
 
@@ -837,20 +825,20 @@ CB_Read_Result cb_read_entire_file(CB_Arena *arena, CB_Str filepath, CB_Write_Bu
   char *c_filepath = cb_str_to_cstr(scratch.arena, filepath);
   FILE* file = fopen(c_filepath, "r");
   if (file == 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not open file "));
-      cb_append_str(stderr, filepath);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not open file "),
+                filepath,
+                S(": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(result);
   }
 
   if (fseek(file, 0, SEEK_END) < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not seek file "));
-      cb_append_str(stderr, filepath);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not seek file "),
+                filepath,
+                S(": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(result);
   }
 
@@ -905,16 +893,12 @@ CB_b32 cb_mkdir_if_not_exists(CB_Str directory, CB_Write_Buffer *stderr)
       cb_return_defer(1);
     }
 
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not create directory \""));
-      cb_append_str(stderr, directory);
-    cb_log_end(stderr, S("\""));
+    cb_log_emit(stderr, CB_LOG_ERROR, S("Could not create directory \""), directory, S("\""));
     cb_return_defer(0);
   }
 
   result = 1;
-  cb_log_begin(stderr, CB_LOG_INFO, S("Created directory \""));
-    cb_append_str(stderr, directory);
-  cb_log_end(stderr, S("\""));
+  cb_log_emit(stderr, CB_LOG_INFO, S("Created directory \""), directory, S("\""));
 
  defer:
   cb_arena_pop_mark(scratch);
@@ -929,13 +913,12 @@ CB_b32 cb_rename(CB_Str old_path, CB_Str new_path, CB_Write_Buffer *stderr)
   char *c_old_path = cb_str_to_cstr(scratch.arena, old_path);
   char *c_new_path = cb_str_to_cstr(scratch.arena, new_path);
   if (rename(c_old_path, c_new_path) < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not rename "));
-      cb_append_str(stderr, old_path);
-      cb_append_lit(stderr, " to ");
-      cb_append_str(stderr, new_path);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not rename file "),
+                old_path,
+                S(" to "),
+                new_path,
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(0);
   }
   cb_return_defer(1);
@@ -956,11 +939,11 @@ CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, CB_size input_p
   if (stat(c_output_path, &statbuf) < 0) {
     // NOTE: if output does not exist it 100% must be rebuilt
     if (errno == ENOENT) { cb_return_defer(1); }
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
-      cb_append_str(stderr, output_path);
-      cb_append_lit(stderr, ": ");
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not stat file "),
+                output_path,
+                S(": "),
+                cb_str_from_cstr(strerror(errno)));
     cb_return_defer(-1);
   }
   CB_i64 output_path_time = statbuf.st_mtime;
@@ -970,11 +953,11 @@ CB_b32 cb_needs_rebuild(CB_Str output_path, CB_Str *input_paths, CB_size input_p
     char *c_input_path = cb_str_to_cstr(scratch.arena, input_path);
     if (stat(c_input_path, &statbuf) < 0) {
       // NOTE: non-existing input is an error cause it is needed for building in the first place
-      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not stat "));
-        cb_append_str(stderr, input_path);
-        cb_append_lit(stderr, ": ");
-        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-      cb_log_end(stderr, S(""));
+      cb_log_emit(stderr, CB_LOG_ERROR,
+                  S("Could not stat file "),
+                  input_path,
+                  S(": "),
+                  cb_str_from_cstr(strerror(errno)));
       cb_return_defer(-1);
     }
     CB_i64 input_path_time = statbuf.st_mtime;
@@ -1002,12 +985,12 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
     cb_log_emit(stderr, CB_LOG_INFO, S("Rebuilding cbuild ..."));
 
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 128);
-    cb_cmd_append_lits(scratch.arena, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-DCBUILD_CONFIGURED");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-g3");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
-    cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=address");
+    cb_cmd_append_lit(scratch.arena, &cmd, "cc", "-o", "build/cbuild.new", "cbuild.c");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-DCBUILD_CONFIGURED");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-g3");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=undefined");
+    cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=address");
 
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_exit(1); }
 
@@ -1016,9 +999,7 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
     if (!cb_rename(S("build/cbuild.new"), S("cbuild"), stderr)) { cb_exit(1); }
 
     // Re-run yourself
-    cb_log_begin(stderr, CB_LOG_INFO, S("CMD: "));
-      cb_append_str(stderr, cb_str_from_cstr(argv[0]));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_INFO, S("CMD: "), cb_str_from_cstr(argv[0]));
     char *argv_empty[] = { argv[0], 0 };
     execv(argv_empty[0], argv_empty);
 
@@ -1032,15 +1013,16 @@ CB_Proc cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
 {
   CB_assert(command.len >= 1);
 
-  cb_log_begin(stderr, CB_LOG_INFO, S("CMD: "));
+  cb_log_begin(stderr, CB_LOG_INFO);
+    cb_append(stderr, S("CMD: "));
     cb_cmd_render(command, stderr);
-  cb_log_end(stderr, (CB_Str){0});
+  cb_log_end(stderr);
 
   pid_t cpid = fork();
   if (cpid < 0) {
-    cb_log_begin(stderr, CB_LOG_ERROR, S("Could not fork child process: "));
-      cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-    cb_log_end(stderr, (CB_Str){0});
+    cb_log_emit(stderr, CB_LOG_ERROR,
+                S("Could not fork child process: "),
+                cb_str_from_cstr(strerror(errno)));
     return CB_INVALID_PROC;
   }
 
@@ -1057,9 +1039,9 @@ CB_Proc cb_cmd_run_async(CB_Command command, CB_Write_Buffer *stderr)
     }
 
     if (execvp(cmd_null[0], cmd_null) < 0) {
-      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not exec child process: "));
-        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-      cb_log_end(stderr, (CB_Str){0});
+      cb_log_emit(stderr, CB_LOG_ERROR,
+                  S("Could not exec child process: "),
+                  cb_str_from_cstr(strerror(errno)));
       cb_exit(1);
     }
     CB_assert(0 && "unreachable");
@@ -1084,20 +1066,21 @@ CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr)
   for (;;) {
     int wstatus = 0;
     if (waitpid(proc, &wstatus, 0) < 0) {
-      cb_log_begin(stderr, CB_LOG_ERROR, S("Could not wait on child process (pid "));
+      cb_log_begin(stderr, CB_LOG_ERROR);
+        cb_append(stderr, S("Could not wait on child process (pid "));
         cb_append_long(stderr, (long)proc);
-        cb_append_lit(stderr, "): ");
-        cb_append_str(stderr, cb_str_from_cstr(strerror(errno)));
-      cb_log_end(stderr, (CB_Str){0});
+        cb_append(stderr, S("): "), cb_str_from_cstr(strerror(errno)));
+      cb_log_end(stderr);
       return 0;
     }
 
     if (WIFEXITED(wstatus)) {
       int exit_status = WEXITSTATUS(wstatus);
       if (exit_status != 0) {
-        cb_log_begin(stderr, CB_LOG_ERROR, S("Child process exited with exit code "));
+        cb_log_begin(stderr, CB_LOG_ERROR);
+          cb_append(stderr, S("Child process exited with exit code "));
           cb_append_long(stderr, (long)exit_status);
-        cb_log_end(stderr, (CB_Str){0});
+        cb_log_end(stderr);
         return 0;
       }
 
@@ -1105,9 +1088,9 @@ CB_b32 cb_proc_wait(CB_Proc proc, CB_Write_Buffer *stderr)
     }
 
     if (WIFSIGNALED(wstatus)) {
-      cb_log_begin(stderr, CB_LOG_ERROR, S("Child process was terminated by "));
-        cb_append_str(stderr, cb_str_from_cstr(strsignal(WTERMSIG(wstatus))));
-      cb_log_end(stderr, (CB_Str){0});
+      cb_log_emit(stderr, CB_LOG_ERROR,
+                  S("Child process was terminated by "),
+                  cb_str_from_cstr(strsignal(WTERMSIG(wstatus))));
       return 0;
     }
   }
