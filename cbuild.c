@@ -130,7 +130,7 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
   CB_Str sokol_out = S("build/libsokol.a");
   #define SOKOL_LOC "vendor/sokol/"
   CB_Str sokol_sources[] = {
-    S("src/sokol.c"),
+    S("examples/sokol.c"),
     S(SOKOL_LOC "sokol_app.h"),
     S(SOKOL_LOC "sokol_gfx.h"),
     S(SOKOL_LOC "sokol_time.h"),
@@ -146,7 +146,7 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
     cb_cmd_append_lits(scratch.arena, &cmd, "cc");
     cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), sokol_out);
-    cb_cmd_append_strs(scratch.arena, &cmd, S("-c"), S("src/sokol.c"));
+    cb_cmd_append_strs(scratch.arena, &cmd, S("-c"), S("examples/sokol.c"));
     cb_cmd_append_lits(scratch.arena, &cmd, "-I" SOKOL_LOC);
     cb_cmd_append_lits(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
 #if defined(SOKOL_DEBUG)
@@ -211,10 +211,10 @@ CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr)
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
 
   CB_Str_Mark mark = cb_write_buffer_mark(b);
-  cb_append_strs(b, S("./src/sokol-examples/"), program, S(".c"));
+  cb_append_strs(b, S("./examples/sokol-examples/"), program, S(".c"));
   CB_Str source = cb_str_from_mark(&mark);
 
-  cb_append_strs(b, S("./src/sokol-examples/"), program, S(".glsl"));
+  cb_append_strs(b, S("./examples/sokol-examples/"), program, S(".glsl"));
   CB_Str shader = cb_str_from_mark(&mark);
 
   cb_append_strs(b, S("build/"), program);
@@ -253,8 +253,8 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 1024);
 
   CB_Str program_name = S("editor");
-  CB_Str source = S("./src/editor.c");
-  CB_Str shader = S("./src/editor.glsl");
+  CB_Str source = S("./examples/editor/editor.c");
+  CB_Str shader = S("./examples/editor/editor.glsl");
 
   CB_Str_Mark mark = cb_write_buffer_mark(b);
   cb_append_strs(b, S("./build/"), program_name);
@@ -272,6 +272,7 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
     cb_cmd_append_lits(scratch.arena, &cmd, "cc");
     cb_cmd_append_strs(scratch.arena, &cmd, S("-o"), exe, source);
+    cb_cmd_append_lits(scratch.arena, &cmd, "-I./vendor/");
     cb_cmd_append_lits(scratch.arena, &cmd, "-lm");
     cb_cmd_append_lits(scratch.arena, &cmd, "-fsanitize=undefined");
     cb_cmd_append_lits(scratch.arena, &cmd, "-Wall", "-Wextra");
