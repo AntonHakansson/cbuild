@@ -486,7 +486,6 @@ static void frame(void)
 {
   const float w = sapp_widthf();
   const float h = sapp_heightf();
-  const float aspect = w / h;
   const float t = (float)(sapp_frame_duration() * 60.0);
   state.elapsed_time += t;
 

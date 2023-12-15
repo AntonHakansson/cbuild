@@ -991,6 +991,7 @@ void cb_rebuild_yourself(int argc, char **argv, CB_Str_List sources, CB_b32 forc
     cb_cmd_append_lit(scratch.arena, &cmd, "-Wall", "-Wextra", "-Wshadow", "-Wconversion");
     cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=undefined");
     cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=address");
+    /* cb_cmd_append_lit(scratch.arena, &cmd, "-fsanitize=thread"); */
 
     if (!cb_cmd_run_sync(cmd, stderr)) { cb_exit(1); }
 

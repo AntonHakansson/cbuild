@@ -4,8 +4,46 @@
 #include "cbuild.h"
 
 #ifdef CBUILD_CONFIGURED
-#include "build/config.h"
+#  include "build/config.h"
 #endif
+
+#if !defined(SOKOL_LIB_ENTRY)
+#  define SOKOL_LIB_ENTRY "vendor/sokol.c"
+#endif
+
+#if defined(CBUILD_CONFIGURED)
+CB_b32 build_freetype_library(CB_Write_Buffer *stderr);
+CB_b32 build_sokol_library(CB_Write_Buffer *stderr);
+CB_b32 build_sokol_example(CB_Str program, CB_Write_Buffer *stderr);
+CB_b32 build_editor(CB_Write_Buffer *stderr);
+
+void run(CB_Arena *perm, CB_Write_Buffer *stderr)
+{
+  { // Print current config
+    cb_log_emit(stderr, CB_LOG_INFO, S("Config:"));
+    CB_Read_Result conf = cb_read_entire_file(perm, S("build/config.h"), stderr);
+    if (!conf.status) {
+      cb_log_emit(stderr, CB_LOG_WARNING, S("Could read from \"build/config.h\", are you running from project root?"));
+      cb_exit(1);
+    }
+    cb_append(stderr, conf.file_contents);
+  }
+
+  { // Builder program
+    cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
+
+    if (!build_freetype_library(stderr)) { cb_exit(1); }
+    if (!build_sokol_library(stderr)) { cb_exit(1); }
+#if defined(BUILD_SOKOL_EXAMPLE)
+    if (!build_sokol_example(S("triangle-sapp"), stderr)) { cb_exit(1); }
+#endif
+#if defined(BUILD_EDITOR)
+    if (!build_editor(stderr)) { cb_exit(1); }
+#endif
+    cb_log_emit(stderr, CB_LOG_INFO, S("Done."));
+  }
+}
+
 
 CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
 {
@@ -15,7 +53,6 @@ CB_b32 build_freetype_library(CB_Write_Buffer *stderr)
   CB_Write_Buffer *b = cb_mem_buffer(scratch.arena, 4 * 1024);
 
   CB_Str freetype_out = S("build/libfreetype.a");
-  #define FREETYPE_LOC "vendor/freetype/"
   CB_Str_List freetype_sources = cb_str_dup_list(scratch.arena,
     FREETYPE_LOC "src/autofit/autofit.c",
     FREETYPE_LOC "src/base/ftbase.c",
@@ -128,9 +165,8 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
   CB_b32 result = 0;
 
   CB_Str sokol_out = S("build/libsokol.a");
-  #define SOKOL_LOC "vendor/sokol/"
   CB_Str sokol_sources[] = {
-    S("examples/sokol.c"),
+    S(SOKOL_LIB_ENTRY),
     S(SOKOL_LOC "sokol_app.h"),
     S(SOKOL_LOC "sokol_gfx.h"),
     S(SOKOL_LOC "sokol_time.h"),
@@ -146,7 +182,7 @@ CB_b32 build_sokol_library(CB_Write_Buffer *stderr)
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
     cb_cmd_append_lit(scratch.arena, &cmd, "cc");
     cb_cmd_append    (scratch.arena, &cmd, S("-o"), sokol_out);
-    cb_cmd_append    (scratch.arena, &cmd, S("-c"), S("examples/sokol.c"));
+    cb_cmd_append    (scratch.arena, &cmd, S("-c"), S(SOKOL_LIB_ENTRY));
     cb_cmd_append_lit(scratch.arena, &cmd, "-I" SOKOL_LOC);
     cb_cmd_append_lit(scratch.arena, &cmd, "-DSOKOL_GLCORE33");
 #if defined(SOKOL_DEBUG)
@@ -189,11 +225,22 @@ CB_b32 shdc_compile_shader(CB_Str shader, CB_Write_Buffer *stderr)
   if (status == 0) { cb_return_defer(1); }
   if (status >  0) {
     CB_Command cmd = cb_da_init(scratch.arena, CB_Command, 64);
-    cb_cmd_append_lit(scratch.arena, &cmd, "./vendor/sokol-tools-bin/bin/linux/sokol-shdc");
-    cb_cmd_append_lit(scratch.arena, &cmd, "-l", "glsl330");
-    cb_cmd_append    (scratch.arena, &cmd, S("-i"), shader);
-    cb_cmd_append    (scratch.arena, &cmd, S("-o"), shader_h);
-    if (!cb_cmd_run_sync(cmd, stderr)) { cb_return_defer(0); }
+#if defined(SOKOL_SHDC_PATH)
+    CB_Str shdc_program = S(SOKOL_SHDC_PATH);
+#else
+    CB_Str shdc_program = S("sokol-shdc");
+#endif
+    cb_cmd_append(scratch.arena, &cmd, shdc_program);
+    cb_cmd_append(scratch.arena, &cmd, S("-l"), S("glsl330"));
+    cb_cmd_append(scratch.arena, &cmd, S("-i"), shader);
+    cb_cmd_append(scratch.arena, &cmd, S("-o"), shader_h);
+    if (!cb_cmd_run_sync(cmd, stderr)) {
+#if !defined(SOKOL_SHDC_PATH)
+      cb_log_emit(stderr, CB_LOG_WARNING,
+                  S("Is \"sokol-shdc\" in PATH? Configure in ./build/config.h"));
+#endif
+      cb_return_defer(0);
+    }
     cb_return_defer(1);
   }
 
@@ -289,6 +336,41 @@ CB_b32 build_editor(CB_Write_Buffer *stderr)
   cb_arena_pop_mark(scratch);
   return result;
 }
+#endif // CBUILD_CONFIGURED
+
+void default_config(CB_Write_Buffer *stderr)
+{
+  CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
+  CB_Write_Buffer *conf = cb_mem_buffer(scratch.arena, 8 * 1024);
+
+  cb_append(conf, S("// One of [ TARGET_WINDOWS, TARGET_LINUX ].\n"));
+#ifdef _WIN32
+  cb_append(conf, S("#define TARGET_WINDOWS\n"));
+#else
+  cb_append(conf, S("#define TARGET_LINUX\n"));
+#endif
+  cb_append(conf, S("\n"));
+  cb_append(conf, S("// Build sokol sapp-triangle example.\n"));
+  cb_append(conf, S("// #define BUILD_SOKOL_EXAMPLE\n"));
+  cb_append(conf, S("\n"));
+  cb_append(conf, S("// Build my sokol editor example.\n"));
+  cb_append(conf, S("#define BUILD_EDITOR\n"));
+  cb_append(conf, S("\n"));
+  cb_append(conf, S("// Location of Sokol library.\n"));
+  cb_append(conf, S("#define SOKOL_LOC \"vendor/sokol/\"\n"));
+  cb_append(conf, S("// To build shaders we use sokol-shdc.\n"));
+  cb_append(conf, S("#define SOKOL_SHDC_PATH \"vendor/sokol-tools-bin/bin/linux/sokol-shdc\"\n"));
+  cb_append(conf, S("// Enable to build sokol with debug information and disable optimizations.\n"));
+  cb_append(conf, S("// #define SOKOL_DEBUG\n"));
+  cb_append(conf, S("\n"));
+  cb_append(conf, S("// Location of Freetype library.\n"));
+  cb_append(conf, S("#define FREETYPE_LOC \"vendor/freetype/\"\n"));
+
+  CB_Str content = (CB_Str){.buf = conf->buf, .len = conf->len, };
+  if (!cb_write_entire_file(S("build/config.h"), content, stderr)) cb_exit(1);
+  cb_log_emit(stderr, CB_LOG_INFO, S("Wrote build/config.h"));
+  cb_arena_pop_mark(scratch);
+}
 
 int main(int argc, char **argv)
 {
@@ -305,65 +387,15 @@ int main(int argc, char **argv)
   if (config_h_exists == 0 || user_requested_to_reconfigure) {
     cb_log_emit(stderr, CB_LOG_INFO, S("Reconfiguring cbuild ..."));
     if (!cb_mkdir_if_not_exists(S("build"), stderr)) cb_exit(1);
-
-    CB_Arena_Mark scratch = cb_arena_get_scratch(0, 0);
-    CB_Write_Buffer *conf = cb_mem_buffer(scratch.arena, 8 * 1024);
-
-    cb_append(conf, S("// One of [ TARGET_WINDOWS, TARGET_LINUX ].\n"));
-#ifdef _WIN32
-    cb_append(conf, S("#define TARGET_WINDOWS\n"));
-#else
-    cb_append(conf, S("#define TARGET_LINUX\n"));
-#endif
-
-#if 0
-    CB_Command git = cb_da_init(scratch.arena, CB_Command, 32);
-    cb_cmd_append_lit(scratch.arena, &git, "git", "rev-parse", "--short", "HEAD");
-    cb_cmd_run_sync(git, stderr);
-#endif
-    CB_Str git_commit = S("ebc58eb");
-
-    cb_append(conf,
-                  S("#define GIT_COMMIT \""),
-                  git_commit,
-                  S("\"\n"));
-
-    cb_append(conf, S("// Build sokol sapp-triangle example.\n"));
-    cb_append(conf, S("// #define BUILD_SOKOL_EXAMPLE\n"));
-    cb_append(conf, S("// Enable to build sokol with debug information and disable optimizations.\n"));
-    cb_append(conf, S("// #define SOKOL_DEBUG\n"));
-
-    CB_Str content = (CB_Str){.buf = conf->buf, .len = conf->len, };
-    if (!cb_write_entire_file(S("build/config.h"), content, stderr)) cb_exit(1);
-    cb_log_emit(stderr, CB_LOG_INFO, S("Wrote build/config.h"));
-    cb_arena_pop_mark(scratch);
-
+    default_config(stderr);
     cb_rebuild_yourself(argc, argv, cbuild_sources, 1, stderr);
   }
 
   CB_Str_List cbuild_configured_sources = cb_str_dup_list(perm, "cbuild.c", "cbuild.h", "build/config.h");
   cb_rebuild_yourself(argc, argv, cbuild_configured_sources, 0, stderr);
 
-#ifdef CBUILD_CONFIGURED
-  { // TODO: Filter comments in config
-    cb_log_emit(stderr, CB_LOG_INFO, S("Config:"));
-    CB_Read_Result conf = cb_read_entire_file(perm, S("build/config.h"), stderr);
-    if (!conf.status) { cb_exit(1); }
-    cb_append(stderr, conf.file_contents);
-  }
-
-  { // Builder program
-    cb_log_emit(stderr, CB_LOG_INFO, S("Starting Build ..."));
-
-    if (!build_freetype_library(stderr)) { cb_exit(1); }
-    if (!build_sokol_library(stderr)) { cb_exit(1); }
-#ifdef BUILD_SOKOL_EXAMPLE
-    if (!build_sokol_example(S("triangle-sapp"), stderr)) { cb_exit(1); }
-#endif
-    if (!build_editor(stderr)) { cb_exit(1); }
-
-    cb_log_emit(stderr, CB_LOG_INFO, S("Done."));
-  }
+#if defined(CBUILD_CONFIGURED)
+  run(perm, stderr);
 #endif
 
   cb_flush(stderr);
